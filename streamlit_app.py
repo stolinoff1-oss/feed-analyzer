@@ -268,48 +268,30 @@ with st.spinner("Анализ данных..."):
 
 st.markdown(ai_text)
 
-# ================== СКАЧИВАНИЕ ОТЧЁТОВ ==================
+# ================== СКАЧИВАНИЕ PDF-ОТЧЁТА ==================
 st.divider()
-st.header("📥 Скачать отчёты")
+st.header("📄 PDF-отчёт")
 
-col_dl1, col_dl2 = st.columns(2)
+st.caption("Содержит: сводную таблицу, все графики, "
+           "рационы для всех образцов, выводы ИИ.")
 
-# --- Excel ---
-with col_dl1:
-    out_path = tempfile.mktemp(suffix=".xlsx")
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
-        df_analysis.to_excel(writer, sheet_name="Рейтинг", index=False)
-        summary_df.to_excel(writer, sheet_name="Сводка рационов", index=False)
-        for name, r in rations.items():
-            safe = str(name)[:25].replace("/", "_").replace("\\", "_")
-            ration_to_dataframe(r).to_excel(
-                writer, sheet_name=f"Рацион_{safe}", index=False)
-    with open(out_path, "rb") as f:
-        st.download_button(
-            "📊 Скачать Excel-отчёт",
-            data=f,
-            file_name="feed_report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
+col_btn, col_dl = st.columns(2)
 
-# --- PDF ---
-with col_dl2:
-    st.caption("PDF-отчёт содержит: сводную таблицу, графики, "
-               "рационы для всех образцов и выводы ИИ.")
+with col_btn:
     if st.button("📄 Подготовить PDF-отчёт", use_container_width=True):
         with st.spinner("Собираем PDF..."):
             try:
                 pdf_bytes = generate_pdf(analysis, rations, ai_text,
                                           live_weight, milk_yield)
                 st.session_state["pdf_bytes"] = pdf_bytes
-                st.success("PDF готов!")
+                st.success("PDF готов! Нажмите кнопку справа.")
             except Exception as e:
                 st.error(f"Ошибка генерации PDF: {e}")
 
+with col_dl:
     if "pdf_bytes" in st.session_state:
         st.download_button(
-            "📄 Скачать PDF-отчёт",
+            "💾 Скачать PDF-отчёт",
             data=st.session_state["pdf_bytes"],
             file_name="feed_report.pdf",
             mime="application/pdf",
