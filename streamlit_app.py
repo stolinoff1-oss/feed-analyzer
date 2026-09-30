@@ -68,7 +68,7 @@ for name, r in rations.items():
         col3.metric("СВ, кг", f"{r['total']['dm']:.1f}", f"{r['total']['dm'] - r['norms']['DM']:+.1f}")
         st.dataframe(ration_to_dataframe(r), use_container_width=True)
 
-st.header("🩺 Рекомендации зоотехника (AI)")
+st.header("🩺 Рекомендации зоотехника")
 context = "\n".join([f"{s['name']}: СП={s['CP']}, крахмал={s['starch']}, НДК={s['NDF']}, NEL-VC={s['NEL_VC']}, RNB={s['RNB']}" for s in analysis["ratings"]])
 ai_text = get_ai_recommendation(context)
 st.markdown(ai_text)
