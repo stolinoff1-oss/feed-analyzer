@@ -3,11 +3,13 @@ import pandas as pd
 import tempfile
 import plotly.express as px
 import plotly.graph_objects as go
-from pdf_report import generate_pdf
 
-from feed_analyzer import load_feed_data, analyze_feeds, feeds_to_dataframe
+from feed_analyzer import (
+    load_feed_data, analyze_feeds, feeds_to_dataframe, debug_columns,
+)
 from ration_calculator import calculate_ration, ration_to_dataframe
 from api_client import get_ai_recommendation, build_context
+from pdf_report import generate_pdf
 
 st.set_page_config(page_title="Анализ кормов", page_icon="🐄", layout="wide")
 
@@ -63,56 +65,83 @@ except Exception as e:
 
 st.success(f"Загружено {len(df)} образцов")
 
+# ================== ОТЛАДКА ==================
+with st.expander("🔧 Отладка: сопоставление колонок Excel → параметры",
+                 expanded=True):
+    st.caption(
+        "Слева — как колонка называется в Excel. "
+        "Справа — под каким именем её видит программа. "
+        "Если справа «None», значит эта колонка не попадает в анализ."
+    )
+    try:
+        mapping = debug_columns(filepath)
+        dbg_df = pd.DataFrame(mapping, columns=["Колонка в Excel",
+                                                 "Распознано как"])
+        st.dataframe(dbg_df, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(f"Ошибка отладки: {e}")
+
 # ================== ВИЗУАЛИЗАЦИЯ ==================
 st.header("📊 Визуализация")
 
-# Готовим данные для графиков
 chart_df = df_analysis.copy()
 
-# --- График 1: Рейтинг (горизонтальный бар) ---
+# --- График 1: Рейтинг ---
 st.subheader("Рейтинг по баллу качества")
-fig_rating = px.bar(
-    chart_df.sort_values("Балл"),
-    x="Балл", y="Образец", orientation="h",
-    color="Балл", color_continuous_scale="RdYlGn",
-    text="Балл",
-    title=None, height=350,
-)
-fig_rating.update_traces(texttemplate="%{text:.1f}", textposition="outside")
-fig_rating.update_layout(showlegend=False, coloraxis_showscale=False,
-                          margin=dict(l=10, r=10, t=10, b=10))
-st.plotly_chart(fig_rating, use_container_width=True)
+if chart_df["Балл"].notna().any():
+    fig_rating = px.bar(
+        chart_df.sort_values("Балл"),
+        x="Балл", y="Образец", orientation="h",
+        color="Балл", color_continuous_scale="RdYlGn",
+        text="Балл", height=350,
+    )
+    fig_rating.update_traces(texttemplate="%{text:.1f}",
+                              textposition="outside")
+    fig_rating.update_layout(showlegend=False, coloraxis_showscale=False,
+                              margin=dict(l=10, r=10, t=10, b=10))
+    st.plotly_chart(fig_rating, use_container_width=True)
+else:
+    st.warning("Нет данных для построения рейтинга.")
 
-# --- График 2: Энергия (NEL-VC) ---
+# --- Графики 2 и 3: NEL-VC и СП ---
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Энергия: NEL-VC (МДж/кг СВ)")
-    fig_nel = px.bar(
-        chart_df.sort_values("NEL-VC", ascending=False),
-        x="Образец", y="NEL-VC",
-        color="NEL-VC", color_continuous_scale="Blues",
-        text="NEL-VC", height=350,
-    )
-    fig_nel.update_traces(texttemplate="%{text:.2f}", textposition="outside")
-    fig_nel.update_layout(coloraxis_showscale=False, xaxis_tickangle=-45,
-                           margin=dict(l=10, r=10, t=10, b=10))
-    st.plotly_chart(fig_nel, use_container_width=True)
+    if chart_df["NEL-VC"].notna().any():
+        fig_nel = px.bar(
+            chart_df.sort_values("NEL-VC", ascending=False),
+            x="Образец", y="NEL-VC",
+            color="NEL-VC", color_continuous_scale="Blues",
+            text="NEL-VC", height=350,
+        )
+        fig_nel.update_traces(texttemplate="%{text:.2f}",
+                               textposition="outside")
+        fig_nel.update_layout(coloraxis_showscale=False, xaxis_tickangle=-45,
+                               margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_nel, use_container_width=True)
+    else:
+        st.warning("Нет данных NEL-VC.")
 
 with col2:
     st.subheader("Протеин: СП (г/кг СВ)")
-    fig_cp = px.bar(
-        chart_df.sort_values("СП, г/кг", ascending=False),
-        x="Образец", y="СП, г/кг",
-        color="СП, г/кг", color_continuous_scale="Greens",
-        text="СП, г/кг", height=350,
-    )
-    fig_cp.update_traces(texttemplate="%{text:.0f}", textposition="outside")
-    fig_cp.update_layout(coloraxis_showscale=False, xaxis_tickangle=-45,
-                          margin=dict(l=10, r=10, t=10, b=10))
-    st.plotly_chart(fig_cp, use_container_width=True)
+    if chart_df["СП, г/кг"].notna().any():
+        fig_cp = px.bar(
+            chart_df.sort_values("СП, г/кг", ascending=False),
+            x="Образец", y="СП, г/кг",
+            color="СП, г/кг", color_continuous_scale="Greens",
+            text="СП, г/кг", height=350,
+        )
+        fig_cp.update_traces(texttemplate="%{text:.0f}",
+                              textposition="outside")
+        fig_cp.update_layout(coloraxis_showscale=False, xaxis_tickangle=-45,
+                              margin=dict(l=10, r=10, t=10, b=10))
+        st.plotly_chart(fig_cp, use_container_width=True)
+    else:
+        st.warning("Колонка «Сырой протеин» не распознана — "
+                   "проверьте отладку выше.")
 
-# --- График 3: Углеводы (крахмал vs сахар vs НДК) ---
+# --- График 4: Углеводы ---
 st.subheader("Углеводный баланс: крахмал, сахар, НДК")
 fig_carbs = go.Figure()
 fig_carbs.add_trace(go.Bar(name="Крахмал", x=chart_df["Образец"],
@@ -128,24 +157,26 @@ fig_carbs.update_layout(barmode="group", height=400,
                                      y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig_carbs, use_container_width=True)
 
-# --- График 4: Radar (паутина) ---
+# --- График 5: Radar ---
 st.subheader("Профиль образцов (радар)")
 
-# Параметры для радара — нормализуем к 0..100
 radar_params = {
-    "NEL-VC": ("NEL-VC", True),
-    "СП":     ("СП, г/кг", True),
-    "Крахмал": ("Крахмал", True),
-    "Сахар":  ("Сахар", True),
-    "Перев. ОВ": ("Перев. ОВ, %", True),
-    "Низкий НДК": ("НДК", False),  # инвертируем: чем меньше, тем лучше
-    "RNB":    ("RNB", True),       # ближе к нулю — лучше
+    "NEL-VC":     ("NEL-VC", True),
+    "СП":         ("СП, г/кг", True),
+    "Крахмал":    ("Крахмал", True),
+    "Сахар":      ("Сахар", True),
+    "Перев. ОВ":  ("Перев. ОВ, %", True),
+    "Низкий НДК": ("НДК", False),
+    "RNB":        ("RNB", True),
 }
+
 radar_df = pd.DataFrame()
 for label, (col, higher_better) in radar_params.items():
-    vals = pd.to_numeric(chart_df[col], errors="coerce").fillna(0)
+    vals = pd.to_numeric(chart_df[col], errors="coerce")
+    if vals.notna().sum() == 0:
+        continue
+    vals = vals.fillna(vals.mean())
     if col == "RNB":
-        # Ближе к нулю = лучше. Инвертируем по модулю.
         score = 100 - (vals.abs() - vals.abs().min()) / \
                 (vals.abs().max() - vals.abs().min() + 1e-9) * 100
     elif higher_better:
@@ -154,33 +185,37 @@ for label, (col, higher_better) in radar_params.items():
         score = (vals.max() - vals) / (vals.max() - vals.min() + 1e-9) * 100
     radar_df[label] = score
 
-fig_radar = go.Figure()
-# Показываем топ-3 и худший для контраста
-top_names = chart_df["Образец"].head(3).tolist()
-bottom_name = chart_df["Образец"].iloc[-1]
-show_samples = top_names + [bottom_name]
-palette = ["#2ECC71", "#3498DB", "#F39C12", "#E74C3C"]
+if not radar_df.empty and len(radar_df.columns) >= 3:
+    fig_radar = go.Figure()
+    top_names = chart_df["Образец"].head(3).tolist()
+    bottom_name = chart_df["Образец"].iloc[-1] if len(chart_df) > 3 else None
+    show_samples = top_names + ([bottom_name] if bottom_name else [])
+    palette = ["#2ECC71", "#3498DB", "#F39C12", "#E74C3C"]
 
-for i, name in enumerate(show_samples):
-    idx = chart_df[chart_df["Образец"] == name].index[0]
-    values = radar_df.loc[idx].tolist()
-    fig_radar.add_trace(go.Scatterpolar(
-        r=values + [values[0]],
-        theta=list(radar_df.columns) + [list(radar_df.columns)[0]],
-        fill="toself",
-        name=name,
-        line=dict(color=palette[i % len(palette)]),
-        opacity=0.6,
-    ))
+    for i, name in enumerate(show_samples):
+        idx_list = chart_df[chart_df["Образец"] == name].index
+        if not len(idx_list):
+            continue
+        idx = idx_list[0]
+        values = radar_df.loc[idx].tolist()
+        fig_radar.add_trace(go.Scatterpolar(
+            r=values + [values[0]],
+            theta=list(radar_df.columns) + [list(radar_df.columns)[0]],
+            fill="toself", name=name,
+            line=dict(color=palette[i % len(palette)]),
+            opacity=0.6,
+        ))
 
-fig_radar.update_layout(
-    polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-    height=500, showlegend=True,
-    margin=dict(l=40, r=40, t=40, b=40),
-)
-st.plotly_chart(fig_radar, use_container_width=True)
-st.caption("Показаны 3 лучших образца и 1 худший для сравнения. "
-           "Чем больше площадь — тем лучше профиль.")
+    fig_radar.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+        height=500, showlegend=True,
+        margin=dict(l=40, r=40, t=40, b=40),
+    )
+    st.plotly_chart(fig_radar, use_container_width=True)
+    st.caption("Показаны 3 лучших образца и 1 худший для сравнения. "
+               "Чем больше площадь — тем лучше профиль.")
+else:
+    st.warning("Недостаточно данных для радара.")
 
 # --- Таблица рейтинга ---
 st.header("📋 Рейтинг образцов (таблица)")
@@ -199,7 +234,10 @@ metrics = [
 for col, (key, label, field) in zip(cols, metrics):
     s = leaders.get(key)
     if s:
-        col.metric(label, s["name"], f"{s.get(field)}")
+        val = s.get(field)
+        col.metric(label, s["name"], f"{val}" if val is not None else "—")
+    else:
+        col.metric(label, "—", "")
 
 # ================== РАСЧЁТ РАЦИОНОВ ДЛЯ ВСЕХ ОБРАЗЦОВ ==================
 st.header("🍽️ Расчёт рационов для всех образцов")
@@ -209,7 +247,6 @@ for s in analysis["ratings"]:
     r = calculate_ration(s, live_weight, milk_yield)
     rations[s["name"]] = r
 
-# Сводная таблица «образец → норма / факт»
 summary_rows = []
 for name, r in rations.items():
     summary_rows.append({
@@ -228,7 +265,6 @@ summary_df = pd.DataFrame(summary_rows)
 st.subheader("Сводная таблица по всем образцам")
 st.dataframe(summary_df, use_container_width=True)
 
-# --- Детальные рационы ---
 st.subheader("Детализация по образцам")
 st.caption("Нажмите на любой образец, чтобы увидеть полный рацион.")
 
@@ -263,7 +299,7 @@ with col_a:
 
 context = build_context(analysis, rations, live_weight, milk_yield)
 
-with st.spinner("Анализ данных..."):
+with st.spinner("Делается анализ..."):
     ai_text = get_ai_recommendation(context, force_refresh=refresh)
 
 st.markdown(ai_text)
