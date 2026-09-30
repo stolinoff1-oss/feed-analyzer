@@ -27,14 +27,12 @@ def _normalize(s: str) -> str:
     return s.strip().lower()
 
 
+# СП полностью убран из анализа
 FIND_SPECS = [
     ("sample_id", ["номер образца"], []),
     ("feed_name", ["наименование корма"], []),
     ("location",  ["местонахождения"], []),
     ("DM",        ["сухая масса"], []),
-    ("CP",        ["сырой протеин", "crude protein", "протеин", "protein"],
-                  ["общий", "total", "soluble", "раствор",
-                   "udp", "nxp", "расщеп", "нерасп"]),
     ("starch",    ["крахмал", "starch"], ["bypass", "транзит"]),
     ("sugar",     ["сахар", "sugar"], []),
     ("NDF",       ["нейтрально-детергентная клетчатка", "ndf"],
@@ -55,33 +53,6 @@ FIND_SPECS = [
     ("CF",        ["сырая клетчатка", "crude fibre", "crude fiber"], []),
     ("Cl",        ["хлорид", "chlorine", "clorine"], []),
 ]
-
-
-def debug_columns(path: str):
-    """Возвращает список: (исходное_имя, распознанное_имя или '— НЕ РАСПОЗНАНО')."""
-    df = pd.read_excel(path, sheet_name="Результаты анализа", header=0)
-    df.columns = [re.sub(r"[\ufeff\u200b-\u200f\u2060-\u206f]", "",
-                          str(c)).strip() for c in df.columns]
-
-    rename_map = {}
-    used = set()
-    for short, keywords, excludes in FIND_SPECS:
-        for col in df.columns:
-            if col in used:
-                continue
-            c = _normalize(col)
-            if any(kw in c for kw in keywords):
-                if any(ex in c for ex in excludes):
-                    continue
-                rename_map[col] = short
-                used.add(col)
-                break
-
-    out = []
-    for col in df.columns:
-        short = rename_map.get(col, None)
-        out.append((col, short))
-    return out
 
 
 def load_feed_data(path: str) -> pd.DataFrame:
@@ -117,7 +88,7 @@ def load_feed_data(path: str) -> pd.DataFrame:
 
 def analyze_feeds(df: pd.DataFrame) -> dict:
     result = {"samples": [], "leaders": {}, "ratings": []}
-    numeric_keys = ["DM", "CP", "starch", "sugar", "NDF", "ADF", "NDFd", "dOM",
+    numeric_keys = ["DM", "starch", "sugar", "NDF", "ADF", "NDFd", "dOM",
                     "NEL", "NEL_VC", "nXP", "RNB", "structure"]
 
     for _, row in df.iterrows():
@@ -134,7 +105,6 @@ def analyze_feeds(df: pd.DataFrame) -> dict:
         return (max if higher_better else min)(valid, key=lambda s: s[col])
 
     result["leaders"] = {
-        "max_CP":     _leader("CP", True),
         "max_starch": _leader("starch", True),
         "max_sugar":  _leader("sugar", True),
         "min_NDF":    _leader("NDF", False),
@@ -143,10 +113,10 @@ def analyze_feeds(df: pd.DataFrame) -> dict:
         "best_RNB":   _leader("RNB", True),
     }
 
+    # Балл без вклада СП
     for s in result["samples"]:
         score = 0.0
         if s["NEL_VC"] is not None: score += (s["NEL_VC"] - 6.5) * 30
-        if s["CP"]     is not None: score += (s["CP"] - 60) * 1.0
         if s["starch"] is not None: score += (s["starch"] - 250) * 0.1
         if s["NDF"]    is not None: score -= (s["NDF"] - 300) * 0.05
         if s["dOM"]    is not None: score += (s["dOM"] - 75) * 1.5
@@ -162,7 +132,7 @@ def feeds_to_dataframe(result: dict) -> pd.DataFrame:
     for i, s in enumerate(result["ratings"], 1):
         rows.append({
             "Рейтинг": i, "Образец": s["name"], "Номер": s["id"],
-            "DM": s["DM"], "СП, г/кг": s["CP"], "Крахмал": s["starch"],
+            "DM": s["DM"], "Крахмал": s["starch"],
             "Сахар": s["sugar"], "НДК": s["NDF"], "КДК": s["ADF"],
             "Перев. ОВ, %": s["dOM"], "NEL": s["NEL"], "NEL-VC": s["NEL_VC"],
             "nXP": s["nXP"], "RNB": s["RNB"], "Балл": s["score"],
