@@ -141,25 +141,27 @@ def _md_to_story(text: str, styles):
             story.append(Spacer(1, 3))
             continue
         if line.startswith("### "):
-            story.append(Paragraph(_inline_md(line[4:]), styles["h3"]))
+            story.append(Paragraph(_inline_md(line[4:]), styles["pdf_h3"]))
             continue
         if line.startswith("## "):
-            story.append(Paragraph(_inline_md(line[3:]), styles["h2"]))
+            story.append(Paragraph(_inline_md(line[3:]), styles["pdf_h2"]))
             continue
         if line.startswith("# "):
-            story.append(Paragraph(_inline_md(line[2:]), styles["h1"]))
+            story.append(Paragraph(_inline_md(line[2:]), styles["pdf_h1"]))
             continue
         if line.startswith("  - ") or line.startswith("  • "):
-            story.append(Paragraph(f"&nbsp;&nbsp;&nbsp;◦ {_inline_md(line[4:].lstrip('-• '))}",
-                                    styles["bullet2"]))
+            story.append(Paragraph(
+                f"&nbsp;&nbsp;&nbsp;◦ {_inline_md(line[4:].lstrip('-• '))}",
+                styles["pdf_bullet2"]))
             continue
         if line.startswith("- ") or line.startswith("* "):
-            story.append(Paragraph(f"• {_inline_md(line[2:])}", styles["bullet"]))
+            story.append(Paragraph(f"• {_inline_md(line[2:])}",
+                                    styles["pdf_bullet"]))
             continue
         m = re.match(r"^(\d+)\.\s+(.*)$", line)
         if m:
             story.append(Paragraph(f"{m.group(1)}. {_inline_md(m.group(2))}",
-                                    styles["bullet"]))
+                                    styles["pdf_bullet"]))
             continue
         if line.startswith("|") and line.endswith("|"):
             if re.match(r"^\|[\s\-:|]+\|$", line):
@@ -167,13 +169,46 @@ def _md_to_story(text: str, styles):
             cells = [c.strip() for c in line.strip("|").split("|")]
             story.append(Paragraph(
                 " &nbsp;|&nbsp; ".join(_inline_md(c) for c in cells),
-                styles["table_row"]))
+                styles["pdf_table_row"]))
             continue
-        story.append(Paragraph(_inline_md(line), styles["body"]))
+        story.append(Paragraph(_inline_md(line), styles["pdf_body"]))
     return story
 
 
 # =============== СБОРКА PDF ===============
+
+def _make_styles():
+    styles = getSampleStyleSheet()
+    # Уникальные имена, чтобы не конфликтовать со встроенными алиасами reportlab
+    styles.add(ParagraphStyle("pdf_title", parent=styles["Title"],
+                              fontName="DejaVu-Bold", fontSize=20,
+                              textColor=PRIMARY, spaceAfter=8))
+    styles.add(ParagraphStyle("pdf_h1", parent=styles["Heading1"],
+                              fontName="DejaVu-Bold", fontSize=15,
+                              textColor=PRIMARY, spaceAfter=6, spaceBefore=10))
+    styles.add(ParagraphStyle("pdf_h2", parent=styles["Heading2"],
+                              fontName="DejaVu-Bold", fontSize=12,
+                              textColor=colors.HexColor("#1F4E2C"),
+                              spaceAfter=4, spaceBefore=8))
+    styles.add(ParagraphStyle("pdf_h3", parent=styles["Heading3"],
+                              fontName="DejaVu-Bold", fontSize=11,
+                              textColor=colors.HexColor("#2C7A3E"),
+                              spaceAfter=2, spaceBefore=6))
+    styles.add(ParagraphStyle("pdf_body", parent=styles["BodyText"],
+                              fontName="DejaVu", fontSize=10, leading=14))
+    styles.add(ParagraphStyle("pdf_bullet", parent=styles["BodyText"],
+                              fontName="DejaVu", fontSize=10, leading=14,
+                              leftIndent=12))
+    styles.add(ParagraphStyle("pdf_bullet2", parent=styles["BodyText"],
+                              fontName="DejaVu", fontSize=9, leading=13,
+                              leftIndent=24))
+    styles.add(ParagraphStyle("pdf_small", parent=styles["BodyText"],
+                              fontName="DejaVu", fontSize=8,
+                              textColor=GREY, leading=11))
+    styles.add(ParagraphStyle("pdf_table_row", parent=styles["BodyText"],
+                              fontName="DejaVu", fontSize=9, leading=12))
+    return styles
+
 
 def generate_pdf(analysis: dict, rations: dict, ai_text: str,
                  live_weight: float, milk_yield: float) -> bytes:
@@ -186,52 +221,24 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
         author="Feed Analyzer",
     )
 
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle("Title2", parent=styles["Title"],
-                              fontName="DejaVu-Bold", fontSize=20,
-                              textColor=PRIMARY, spaceAfter=8))
-    styles.add(ParagraphStyle("h1", parent=styles["Heading1"],
-                              fontName="DejaVu-Bold", fontSize=15,
-                              textColor=PRIMARY, spaceAfter=6, spaceBefore=10))
-    styles.add(ParagraphStyle("h2", parent=styles["Heading2"],
-                              fontName="DejaVu-Bold", fontSize=12,
-                              textColor=colors.HexColor("#1F4E2C"),
-                              spaceAfter=4, spaceBefore=8))
-    styles.add(ParagraphStyle("h3", parent=styles["Heading3"],
-                              fontName="DejaVu-Bold", fontSize=11,
-                              textColor=colors.HexColor("#2C7A3E"),
-                              spaceAfter=2, spaceBefore=6))
-    styles.add(ParagraphStyle("body", parent=styles["BodyText"],
-                              fontName="DejaVu", fontSize=10, leading=14))
-    styles.add(ParagraphStyle("bullet", parent=styles["BodyText"],
-                              fontName="DejaVu", fontSize=10, leading=14,
-                              leftIndent=12))
-    styles.add(ParagraphStyle("bullet2", parent=styles["BodyText"],
-                              fontName="DejaVu", fontSize=9, leading=13,
-                              leftIndent=24))
-    styles.add(ParagraphStyle("small", parent=styles["BodyText"],
-                              fontName="DejaVu", fontSize=8,
-                              textColor=GREY, leading=11))
-    styles.add(ParagraphStyle("table_row", parent=styles["BodyText"],
-                              fontName="DejaVu", fontSize=9, leading=12))
-
+    styles = _make_styles()
     story = []
     date_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
 
     # ---- Титул ----
-    story.append(Paragraph("Отчёт по анализу кормов", styles["Title2"]))
-    story.append(Paragraph(f"Сформирован: {date_str}", styles["small"]))
+    story.append(Paragraph("Отчёт по анализу кормов", styles["pdf_title"]))
+    story.append(Paragraph(f"Сформирован: {date_str}", styles["pdf_small"]))
     story.append(Spacer(1, 6))
     story.append(Paragraph(
         f"<b>Параметры коровы:</b> живая масса {live_weight} кг, "
-        f"суточный удой {milk_yield} кг", styles["body"]))
+        f"суточный удой {milk_yield} кг", styles["pdf_body"]))
     story.append(Paragraph(
         f"<b>Проанализировано образцов:</b> {len(analysis['ratings'])}",
-        styles["body"]))
+        styles["pdf_body"]))
     story.append(Spacer(1, 10))
 
     # ---- 1. Сводная таблица ----
-    story.append(Paragraph("1. Сводная таблица образцов", styles["h1"]))
+    story.append(Paragraph("1. Сводная таблица образцов", styles["pdf_h1"]))
     summary_data = [["№", "Образец", "Балл", "NEL-VC",
                      "СП", "Крахмал", "НДК", "RNB"]]
     for i, s in enumerate(analysis["ratings"], 1):
@@ -263,7 +270,7 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
     story.append(PageBreak())
 
     # ---- 2. Графики ----
-    story.append(Paragraph("2. Графики сравнения", styles["h1"]))
+    story.append(Paragraph("2. Графики сравнения", styles["pdf_h1"]))
 
     df = pd.DataFrame([{
         "Образец": s["name"],
@@ -277,20 +284,20 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
         "RNB": s["RNB"] or 0,
     } for s in analysis["ratings"]])
 
-    story.append(Paragraph("2.1 Рейтинг образцов", styles["h2"]))
+    story.append(Paragraph("2.1 Рейтинг образцов", styles["pdf_h2"]))
     story.append(Image(_bar_chart(df["Образец"].tolist(),
                                     df["Балл"].tolist(),
                                     "Рейтинг по баллу качества"),
                         width=170*mm, height=75*mm))
 
-    story.append(Paragraph("2.2 Энергия: NEL-VC", styles["h2"]))
+    story.append(Paragraph("2.2 Энергия: NEL-VC", styles["pdf_h2"]))
     df_nel = df.sort_values("NEL-VC", ascending=False)
     story.append(Image(_bar_chart(df_nel["Образец"].tolist(),
                                     df_nel["NEL-VC"].tolist(),
                                     "NEL-VC (МДж/кг СВ)", color="#3498DB"),
                         width=170*mm, height=75*mm))
 
-    story.append(Paragraph("2.3 Сырой протеин", styles["h2"]))
+    story.append(Paragraph("2.3 Сырой протеин", styles["pdf_h2"]))
     df_cp = df.sort_values("СП, г/кг", ascending=False)
     story.append(Image(_bar_chart(df_cp["Образец"].tolist(),
                                     df_cp["СП, г/кг"].tolist(),
@@ -298,7 +305,7 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
                         width=170*mm, height=75*mm))
     story.append(PageBreak())
 
-    story.append(Paragraph("2.4 Углеводный баланс", styles["h2"]))
+    story.append(Paragraph("2.4 Углеводный баланс", styles["pdf_h2"]))
     story.append(Image(_grouped_chart(
         df["Образец"].tolist(),
         {"Крахмал": df["Крахмал"].tolist(),
@@ -306,20 +313,21 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
          "НДК": df["НДК"].tolist()},
         "Крахмал, сахар, НДК"), width=170*mm, height=85*mm))
 
-    story.append(Paragraph("2.5 Профиль образцов (радар)", styles["h2"]))
+    story.append(Paragraph("2.5 Профиль образцов (радар)", styles["pdf_h2"]))
     try:
         story.append(Image(_radar_chart(df, top_n=4),
                             width=145*mm, height=120*mm))
-    except Exception:
-        story.append(Paragraph("Радар не построен.", styles["small"]))
+    except Exception as e:
+        story.append(Paragraph(f"Радар не построен: {e}",
+                                styles["pdf_small"]))
     story.append(PageBreak())
 
     # ---- 3. Рационы ----
     story.append(Paragraph("3. Расчёт рационов для всех образцов",
-                            styles["h1"]))
+                            styles["pdf_h1"]))
 
     for i, (name, r) in enumerate(rations.items(), 1):
-        story.append(Paragraph(f"3.{i}. {name}", styles["h2"]))
+        story.append(Paragraph(f"3.{i}. {name}", styles["pdf_h2"]))
 
         norm = r["norms"]
         tot = r["total"]
@@ -374,23 +382,23 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
 
         if r["corrections"]:
             story.append(Spacer(1, 4))
-            story.append(Paragraph("<b>Корректировки:</b>", styles["body"]))
+            story.append(Paragraph("<b>Корректировки:</b>", styles["pdf_body"]))
             for c in r["corrections"]:
-                story.append(Paragraph(f"• {c}", styles["bullet"]))
+                story.append(Paragraph(f"• {c}", styles["pdf_bullet"]))
 
         story.append(Spacer(1, 12))
 
     story.append(PageBreak())
 
     # ---- 4. Выводы AI ----
-    story.append(Paragraph("4. Выводы зоотехника (ИИ)", styles["h1"]))
+    story.append(Paragraph("4. Выводы зоотехника (ИИ)", styles["pdf_h1"]))
     story.append(Spacer(1, 4))
     story.extend(_md_to_story(ai_text, styles))
 
     story.append(Spacer(1, 20))
     story.append(Paragraph(
         f"Отчёт сформирован автоматически • {date_str} • Feed Analyzer",
-        styles["small"]))
+        styles["pdf_small"]))
 
     doc.build(story)
     buffer.seek(0)
