@@ -3,6 +3,7 @@ import pandas as pd
 import tempfile
 import plotly.express as px
 import plotly.graph_objects as go
+from pdf_report import generate_pdf
 
 from feed_analyzer import load_feed_data, analyze_feeds, feeds_to_dataframe
 from ration_calculator import calculate_ration, ration_to_dataframe
