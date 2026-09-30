@@ -12,12 +12,19 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     Image, PageBreak,
 )
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+
+
+# === Контакт в колонтитуле ===
+CONTACT_EMAIL = "viktar.hrechka@syngenta.com"
+CONTACT_TEXT = f"По всем вопросам: {CONTACT_EMAIL}"
 
 
 _MPL_FONTS = os.path.join(matplotlib.get_data_path(), "fonts", "ttf")
@@ -32,6 +39,74 @@ PRIMARY = colors.HexColor("#2C7A3E")
 ACCENT = colors.HexColor("#F39C12")
 GREY = colors.HexColor("#7F8C8D")
 LIGHT = colors.HexColor("#ECF0F1")
+BORDER = colors.HexColor("#D5DBDB")
+
+
+# =============== КОЛОНТИТУЛЫ ===============
+
+def _draw_page_decorations(canvas, doc):
+    """Рисует лого1 (слева), лого3 (справа), email (по центру) и номер стр."""
+    canvas.saveState()
+    page_w, page_h = A4
+
+    logo_height = 9 * mm
+    top_pad = 8 * mm
+    side_pad = 15 * mm
+
+    # --- logo1: слева сверху ---
+    if os.path.exists("logo1.png"):
+        try:
+            img = ImageReader("logo1.png")
+            iw, ih = img.getSize()
+            w = logo_height * iw / ih
+            canvas.drawImage(
+                "logo1.png",
+                side_pad, page_h - top_pad - logo_height,
+                width=w, height=logo_height,
+                preserveAspectRatio=True, mask="auto",
+            )
+        except Exception:
+            pass
+
+    # --- logo3: справа сверху ---
+    if os.path.exists("logo3.png"):
+        try:
+            img = ImageReader("logo3.png")
+            iw, ih = img.getSize()
+            w = logo_height * iw / ih
+            canvas.drawImage(
+                "logo3.png",
+                page_w - side_pad - w, page_h - top_pad - logo_height,
+                width=w, height=logo_height,
+                preserveAspectRatio=True, mask="auto",
+            )
+        except Exception:
+            pass
+
+    # --- email по центру ---
+    canvas.setFont("DejaVu", 8)
+    canvas.setFillColor(PRIMARY)
+    tw = stringWidth(CONTACT_TEXT, "DejaVu", 8)
+    canvas.drawString((page_w - tw) / 2,
+                       page_h - top_pad - logo_height / 2 - 3,
+                       CONTACT_TEXT)
+
+    # --- разделительная линия под шапкой ---
+    canvas.setStrokeColor(BORDER)
+    canvas.setLineWidth(0.5)
+    canvas.line(side_pad,
+                page_h - top_pad - logo_height - 4 * mm,
+                page_w - side_pad,
+                page_h - top_pad - logo_height - 4 * mm)
+
+    # --- номер страницы внизу ---
+    canvas.setFont("DejaVu", 8)
+    canvas.setFillColor(GREY)
+    page_num = f"Страница {doc.page}"
+    tw = stringWidth(page_num, "DejaVu", 8)
+    canvas.drawString((page_w - tw) / 2, 8 * mm, page_num)
+
+    canvas.restoreState()
 
 
 # =============== ОЧИСТКА ТЕКСТА ===============
@@ -168,7 +243,6 @@ def _inline_md(s: str) -> str:
 
 
 def _md_to_story(text: str, styles):
-    """Парсит markdown, включая таблицы, в flowable-элементы reportlab."""
     story = []
     text = _fix_mojibake(text)
     lines = text.split("\n")
@@ -177,19 +251,16 @@ def _md_to_story(text: str, styles):
     while i < len(lines):
         line = lines[i].rstrip()
 
-        # --- Определяем начало markdown-таблицы ---
+        # --- markdown-таблица ---
         if (line.startswith("|") and line.endswith("|")
                 and i + 1 < len(lines)
                 and re.match(r"^\|[\s\-:|]+\|$", lines[i + 1].strip())):
-            # Собираем все строки таблицы
             table_lines = []
             j = i
             while j < len(lines) and lines[j].strip().startswith("|"):
                 table_lines.append(lines[j].strip())
                 j += 1
 
-            # Первая строка — заголовки, вторая — разделитель,
-            # остальные — данные
             header_cells = [c.strip()
                             for c in table_lines[0].strip("|").split("|")]
             data_rows = []
@@ -197,7 +268,6 @@ def _md_to_story(text: str, styles):
                 cells = [c.strip() for c in tl.strip("|").split("|")]
                 data_rows.append(cells)
 
-            # Строим reportlab-таблицу
             table_data = [[_inline_md(c) for c in header_cells]]
             for row in data_rows:
                 row = (row + [""] * len(header_cells))[:len(header_cells)]
@@ -237,7 +307,6 @@ def _md_to_story(text: str, styles):
             i = j
             continue
 
-        # --- Обычные строки ---
         if not line:
             story.append(Spacer(1, 3))
             i += 1
@@ -337,10 +406,11 @@ def _make_table(data, col_widths, header_color=PRIMARY):
 def generate_pdf(analysis: dict, rations: dict, ai_text: str,
                  live_weight: float, milk_yield: float) -> bytes:
     buffer = io.BytesIO()
+    # Увеличены поля сверху/снизу — чтобы контент не залезал на колонтитулы
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
         leftMargin=15 * mm, rightMargin=15 * mm,
-        topMargin=15 * mm, bottomMargin=15 * mm,
+        topMargin=25 * mm, bottomMargin=18 * mm,
         title="Отчёт по анализу кормов",
         author="Feed Analyzer",
     )
@@ -487,6 +557,11 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
         f"Отчёт сформирован автоматически • {date_str} • Feed Analyzer",
         styles["pdf_small"]))
 
-    doc.build(story)
+    # === Собираем PDF с колонтитулами на каждой странице ===
+    doc.build(
+        story,
+        onFirstPage=_draw_page_decorations,
+        onLaterPages=_draw_page_decorations,
+    )
     buffer.seek(0)
     return buffer.getvalue()
