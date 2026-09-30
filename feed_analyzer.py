@@ -6,6 +6,10 @@ import re
 def _num(x):
     if x is None:
         return None
+    if isinstance(x, str):
+        x = re.sub(r"[\s\xa0\u200b\u2060]+", "", x).replace(",", ".")
+        if not x:
+            return None
     try:
         f = float(x)
         if np.isnan(f):
@@ -17,97 +21,96 @@ def _num(x):
 
 def _normalize(s: str) -> str:
     s = str(s)
+    s = re.sub(r"[\ufeff\u200b-\u200f\u2060-\u206f]", "", s)
     s = s.replace("\xa0", " ").replace("\u2009", " ").replace("\u202f", " ")
     s = re.sub(r"\s+", " ", s)
     return s.strip().lower()
 
 
-PATTERNS = {
-    "sample_id": ["номер образца"],
-    "feed_name": ["наименование корма"],
-    "location":  ["местонахождения"],
-    "DM":        ["сухая масса"],
-    "starch":    ["крахмал"],
-    "sugar":     ["сахар"],
-    "NDF":       ["нейтрально-детергентная клетчатка"],
-    "ADF":       ["кислотно-детергентная клетчатка"],
-    "ADL":       ["кислотно-детергентный лингнин"],
-    "NDFd":      ["ндк-перевариваемость", "ndf digest"],
-    "dOM":       ["переваримость ов"],
-    "NEL_VC":    ["nel-vc"],
-    "NEL":       ["чистая энергия лактации"],
-    "nXP":       ["(nxp)"],
-    "UDP":       ["(udp)"],
-    "RNB":       ["(rnb)"],
-    "structure": ["structure value"],
-    "NFC":       ["(nfc)"],
-    "ash":       ["сырая зола"],
-    "fat":       ["сырой жир"],
-    "CF":        ["сырая клетчатка"],
-    "Cl":        ["хлорид"],
-}
+FIND_SPECS = [
+    ("sample_id", ["номер образца"], []),
+    ("feed_name", ["наименование корма"], []),
+    ("location",  ["местонахождения"], []),
+    ("DM",        ["сухая масса"], []),
+    ("CP",        ["сырой протеин", "crude protein", "протеин", "protein"],
+                  ["общий", "total", "soluble", "раствор",
+                   "udp", "nxp", "расщеп", "нерасп"]),
+    ("starch",    ["крахмал", "starch"], ["bypass", "транзит"]),
+    ("sugar",     ["сахар", "sugar"], []),
+    ("NDF",       ["нейтрально-детергентная клетчатка", "ndf"],
+                  ["перевар", "digest"]),
+    ("ADF",       ["кислотно-детергентная клетчатка", "adf"], []),
+    ("ADL",       ["кислотно-детергентный лингнин", "adl"], []),
+    ("NDFd",      ["ндк-перевариваемость", "ndf digest"], []),
+    ("dOM",       ["переваримость ов"], []),
+    ("NEL_VC",    ["nel-vc"], []),
+    ("NEL",       ["чистая энергия лактации"], ["nel-vc"]),
+    ("nXP",       ["(nxp)", " nxp"], []),
+    ("UDP",       ["(udp)", " udp"], []),
+    ("RNB",       ["(rnb)", " rnb"], []),
+    ("structure", ["structure value"], []),
+    ("NFC",       ["(nfc)"], []),
+    ("ash",       ["сырая зола", "crude ash"], []),
+    ("fat",       ["сырой жир", "crude fat"], []),
+    ("CF",        ["сырая клетчатка", "crude fibre", "crude fiber"], []),
+    ("Cl",        ["хлорид", "chlorine", "clorine"], []),
+]
 
 
-def _find_cp_column(columns, exclude=None):
-    """Ищет колонку 'Сырой протеин' (НЕ Total). Максимально толерантно."""
-    exclude = set(exclude or [])
-    # Приоритет 1: точное совпадение с 'Crude protein)' (не 'Total Crude protein)')
-    for col in columns:
-        if col in exclude:
-            continue
-        c = _normalize(col)
-        if "сырой протеин" in c and "общий" not in c and "total" not in c:
-            return col
-    # Приоритет 2: любая, где есть 'протеин' и '(г/кг', но нет 'общий'/'total'
-    for col in columns:
-        if col in exclude:
-            continue
-        c = _normalize(col)
-        if "протеин" in c and "г/кг" in c and "общий" not in c and "total" not in c:
-            return col
-    # Приоритет 3: любая со словом 'протеин' без 'общий'/'total'
-    for col in columns:
-        if col in exclude:
-            continue
-        c = _normalize(col)
-        if "протеин" in c and "общий" not in c and "total" not in c:
-            return col
-    return None
-
-
-def load_feed_data(path: str) -> pd.DataFrame:
+def debug_columns(path: str):
+    """Возвращает список: (исходное_имя, распознанное_имя или '— НЕ РАСПОЗНАНО')."""
     df = pd.read_excel(path, sheet_name="Результаты анализа", header=0)
+    df.columns = [re.sub(r"[\ufeff\u200b-\u200f\u2060-\u206f]", "",
+                          str(c)).strip() for c in df.columns]
 
     rename_map = {}
     used = set()
-
-    for short, keywords in PATTERNS.items():
+    for short, keywords, excludes in FIND_SPECS:
         for col in df.columns:
             if col in used:
                 continue
             c = _normalize(col)
             if any(kw in c for kw in keywords):
-                if short == "NEL" and "nel-vc" in c:
+                if any(ex in c for ex in excludes):
                     continue
                 rename_map[col] = short
                 used.add(col)
                 break
 
-    # Отдельно ищем CP
-    cp_col = _find_cp_column(df.columns, exclude=used)
-    if cp_col:
-        rename_map[cp_col] = "CP"
-        used.add(cp_col)
+    out = []
+    for col in df.columns:
+        short = rename_map.get(col, None)
+        out.append((col, short))
+    return out
+
+
+def load_feed_data(path: str) -> pd.DataFrame:
+    df = pd.read_excel(path, sheet_name="Результаты анализа", header=0)
+    df.columns = [re.sub(r"[\ufeff\u200b-\u200f\u2060-\u206f]", "",
+                          str(c)).strip() for c in df.columns]
+
+    rename_map = {}
+    used = set()
+    for short, keywords, excludes in FIND_SPECS:
+        for col in df.columns:
+            if col in used:
+                continue
+            c = _normalize(col)
+            if any(kw in c for kw in keywords):
+                if any(ex in c for ex in excludes):
+                    continue
+                rename_map[col] = short
+                used.add(col)
+                break
 
     df = df.rename(columns=rename_map)
-
-    keep = [c for c in PATTERNS.keys()] + ["CP"]
+    keep = [spec[0] for spec in FIND_SPECS]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].copy()
 
     for col in df.columns:
         if col not in ("sample_id", "feed_name", "location"):
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = df[col].apply(_num)
 
     return df.dropna(subset=["sample_id"]).reset_index(drop=True)
 
