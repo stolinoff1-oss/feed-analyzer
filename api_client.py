@@ -1,5 +1,4 @@
 import requests
-import streamlit as st
 
 SYSTEM_PROMPT = """Ты — опытный зоотехник-консультант по кормлению молочного скота.
 Ты получаешь результаты лабораторного анализа кукурузного силоса и расчёт рациона.
@@ -9,24 +8,21 @@ SYSTEM_PROMPT = """Ты — опытный зоотехник-консульта
 3. Что скорректировать в рационе.
 Отвечай структурированно, без воды, на русском языке."""
 
-# === AIAI.BY / Vedai (OpenAI-совместимый) ===
+# === AIAI.BY (OpenAI-совместимый) ===
 AIAI_API_URL = "https://api.aiai.by/v1/chat/completions"
-AIAI_MODEL = "deepseek-chat"  # из документации; при желании замените на другую доступную
+AIAI_MODEL = "deepseek-chat"
+
+# ⚠️ ВНИМАНИЕ: ключ вписан прямо в код. Не публикуйте этот файл.
+# Как только всё заработает — перенесите ключ обратно в Secrets и удалите отсюда.
+AIAI_API_KEY = "sk-vedai-Zqym3Wk0VsES1RsAPsrNYLpuSR7H1ovPErAV8gTyiBU"
 
 
 def get_ai_recommendation(context: str) -> str:
-    api_key = st.secrets.get("AIAI_API_KEY", "")
-    if not api_key or not api_key.startswith("sk-"):
-        return (
-            "⚠️ API-ключ AIAI.BY не задан в Secrets.\n\n"
-            "Как исправить:\n"
-            "1. Зайдите в Streamlit Cloud → Manage app → Settings → Secrets.\n"
-            "2. Добавьте строку: AIAI_API_KEY = \"sk-vedai-ваш-ключ\"\n"
-            "3. Сохраните — приложение перезапустится автоматически."
-        )
+    if not AIAI_API_KEY or not AIAI_API_KEY.startswith("sk-"):
+        return "⚠️ API-ключ не задан в коде."
 
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {AIAI_API_KEY}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -40,15 +36,15 @@ def get_ai_recommendation(context: str) -> str:
     try:
         r = requests.post(AIAI_API_URL, headers=headers, json=payload, timeout=120)
         if r.status_code == 401:
-            return "❌ Ошибка 401: Неверный API-ключ AIAI.BY. Проверьте ключ в Secrets."
+            return f"❌ Ошибка 401: Неверный ключ.\nURL: {AIAI_API_URL}\nМодель: {AIAI_MODEL}\nОтвет сервера: {r.text[:400]}"
         if r.status_code == 402:
-            return "❌ Ошибка 402: Закончился баланс на AIAI.BY. Пополните счёт на console.aiai.by."
+            return "❌ Ошибка 402: Закончился баланс AIAI.BY."
         if r.status_code == 429:
-            return "❌ Ошибка 429: Превышен лимит запросов. Подождите минуту и обновите."
+            return "❌ Ошибка 429: Слишком много запросов."
         if r.status_code >= 400:
             return f"❌ Ошибка {r.status_code}: {r.text[:500]}"
         return r.json()["choices"][0]["message"]["content"]
     except requests.exceptions.Timeout:
-        return "⏱️ Таймаут: AIAI.BY не ответил за 2 минуты. Попробуйте ещё раз."
+        return "⏱️ Таймаут: сервер не ответил за 2 минуты."
     except Exception as e:
-        return f"❌ Ошибка API: {e}"
+        return f"❌ Ошибка: {e}"
