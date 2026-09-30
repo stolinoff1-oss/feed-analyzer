@@ -83,7 +83,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ================== ЗАГОЛОВОК ==================
 st.markdown(
     "<h1 style='text-align:center; color:#2C7A3E; "
     "margin-top:16px; margin-bottom:2px; font-size:32px;'>"
@@ -116,7 +115,6 @@ mode = st.radio(
 
 df = None
 
-
 # ---------- Режим 1: Excel ----------
 if mode == "📁 Загрузить Excel-файл":
     uploaded = st.file_uploader("Excel-файл с анализами (.xlsx)",
@@ -141,85 +139,58 @@ else:
     n_silos = st.number_input(
         "Сколько силосов добавить?",
         min_value=1, max_value=30, value=3, step=1,
-        help="Введите число от 1 до 30. Для каждого силоса появится форма.",
     )
-
-    st.caption("Заполните данные для каждого силоса. "
-               "Поля отмечены * обязательны.")
+    st.caption("Заполните данные для каждого силоса.")
 
     silos_data = []
     for i in range(int(n_silos)):
         with st.expander(f"🌽 Силос №{i+1}", expanded=(i == 0)):
             name = st.text_input("Название *",
-                                  value=f"Силос {i+1}",
-                                  key=f"name_{i}")
+                                  value=f"Силос {i+1}", key=f"name_{i}")
 
             c1, c2, c3 = st.columns(3)
-            dm = c1.number_input("Сухая масса, г/кг *",
-                                  min_value=100.0, max_value=700.0,
-                                  value=350.0, step=5.0, key=f"dm_{i}")
-            starch = c2.number_input("Крахмал, г/кг СВ",
-                                      min_value=0.0, max_value=700.0,
-                                      value=350.0, step=5.0, key=f"starch_{i}")
-            sugar = c3.number_input("Сахар, г/кг СВ",
-                                     min_value=0.0, max_value=300.0,
-                                     value=80.0, step=5.0, key=f"sugar_{i}")
+            dm = c1.number_input("Сухая масса, г/кг *", 100.0, 700.0,
+                                  350.0, 5.0, key=f"dm_{i}")
+            starch = c2.number_input("Крахмал, г/кг СВ", 0.0, 700.0,
+                                      350.0, 5.0, key=f"starch_{i}")
+            sugar = c3.number_input("Сахар, г/кг СВ", 0.0, 300.0,
+                                     80.0, 5.0, key=f"sugar_{i}")
 
             c1, c2, c3 = st.columns(3)
-            ndf = c1.number_input("НДК, г/кг СВ",
-                                   min_value=0.0, max_value=700.0,
-                                   value=350.0, step=5.0, key=f"ndf_{i}")
-            adf = c2.number_input("КДК, г/кг СВ",
-                                   min_value=0.0, max_value=500.0,
-                                   value=180.0, step=5.0, key=f"adf_{i}")
-            dom = c3.number_input("Переваримость ОВ, %",
-                                   min_value=50.0, max_value=95.0,
-                                   value=80.0, step=0.5, key=f"dom_{i}")
+            ndf = c1.number_input("НДК, г/кг СВ", 0.0, 700.0,
+                                   350.0, 5.0, key=f"ndf_{i}")
+            adf = c2.number_input("КДК, г/кг СВ", 0.0, 500.0,
+                                   180.0, 5.0, key=f"adf_{i}")
+            dom = c3.number_input("Переваримость ОВ, %", 50.0, 95.0,
+                                   80.0, 0.5, key=f"dom_{i}")
 
             c1, c2, c3 = st.columns(3)
-            nel = c1.number_input("NEL, МДж/кг СВ",
-                                   min_value=4.0, max_value=10.0,
-                                   value=7.0, step=0.1, key=f"nel_{i}")
-            nel_vc = c2.number_input(
-                "NEL-VC, МДж/кг СВ",
-                min_value=0.0, max_value=10.0,
-                value=0.0, step=0.1, key=f"nelvc_{i}",
-                help="Оставьте 0, чтобы использовать значение NEL",
-            )
-            nxp = c3.number_input("nXP, г/кг СВ",
-                                   min_value=0.0, max_value=300.0,
-                                   value=135.0, step=1.0, key=f"nxp_{i}")
+            nel = c1.number_input("NEL, МДж/кг СВ", 4.0, 10.0,
+                                   7.0, 0.1, key=f"nel_{i}")
+            nel_vc = c2.number_input("NEL-VC, МДж/кг СВ", 0.0, 10.0,
+                                      0.0, 0.1, key=f"nelvc_{i}",
+                                      help="0 → использовать NEL")
+            nxp = c3.number_input("nXP, г/кг СВ", 0.0, 300.0,
+                                   135.0, 1.0, key=f"nxp_{i}")
 
             c1, c2 = st.columns(2)
-            rnb = c1.number_input("RNB, г/кг СВ",
-                                   min_value=-30.0, max_value=30.0,
-                                   value=-10.0, step=0.5, key=f"rnb_{i}")
-            structure = c2.number_input("Структурный показатель",
-                                         min_value=0.5, max_value=3.0,
-                                         value=1.5, step=0.1,
-                                         key=f"struct_{i}")
+            rnb = c1.number_input("RNB, г/кг СВ", -30.0, 30.0,
+                                   -10.0, 0.5, key=f"rnb_{i}")
+            structure = c2.number_input("Структурный показатель", 0.5, 3.0,
+                                          1.5, 0.1, key=f"struct_{i}")
 
             silos_data.append({
-                "id": f"M{i+1:03d}",
-                "name": name,
-                "DM": dm,
-                "starch": starch,
-                "sugar": sugar,
-                "NDF": ndf,
-                "ADF": adf,
-                "dOM": dom,
-                "NEL": nel,
-                "NEL_VC": nel_vc,
-                "nXP": nxp,
-                "RNB": rnb,
-                "structure": structure,
+                "id": f"M{i+1:03d}", "name": name,
+                "DM": dm, "starch": starch, "sugar": sugar,
+                "NDF": ndf, "ADF": adf, "dOM": dom,
+                "NEL": nel, "NEL_VC": nel_vc, "nXP": nxp,
+                "RNB": rnb, "structure": structure,
             })
 
     if st.button("🔬 Рассчитать рационы", type="primary"):
         st.session_state["manual_silos"] = silos_data
         st.session_state["manual_count"] = int(n_silos)
 
-    # Проверяем, что данные сохранены и количество совпадает
     if ("manual_silos" not in st.session_state
             or st.session_state.get("manual_count") != int(n_silos)):
         st.info("👆 Заполните данные и нажмите «Рассчитать рационы»")
@@ -228,7 +199,7 @@ else:
     df = dataframe_from_input(st.session_state["manual_silos"])
 
 
-# ================== ОБЩАЯ ЛОГИКА ==================
+# ================== АНАЛИЗ ==================
 try:
     analysis = analyze_feeds(df)
     df_analysis = feeds_to_dataframe(analysis)
@@ -237,6 +208,7 @@ except Exception as e:
     st.stop()
 
 st.success(f"Обработано {len(df)} образцов")
+
 
 # ================== ВИЗУАЛИЗАЦИЯ ==================
 st.header("📊 Визуализация")
@@ -294,7 +266,6 @@ radar_params = {
     "Низкий НДК": ("НДК", False),
     "RNB":        ("RNB", True),
 }
-
 radar_df = pd.DataFrame()
 for label, (col, higher_better) in radar_params.items():
     vals = pd.to_numeric(chart_df[col], errors="coerce")
@@ -339,6 +310,7 @@ if not radar_df.empty and len(radar_df.columns) >= 3:
     st.plotly_chart(fig_radar, use_container_width=True)
     st.caption("Показаны 3 лучших образца и 1 худший для сравнения.")
 
+
 # ================== ТАБЛИЦА ==================
 st.header("📋 Рейтинг образцов (таблица)")
 st.dataframe(df_analysis, use_container_width=True)
@@ -359,7 +331,8 @@ for col, (key, label, field) in zip(cols, metrics):
     else:
         col.metric(label, "—", "")
 
-# ================== РАЦИОНЫ ==================
+
+# ================== РАЦИОНЫ (все образцы) ==================
 st.header("🍽️ Расчёт рационов для всех образцов")
 
 rations = {}
@@ -389,14 +362,11 @@ st.subheader("Детализация по образцам")
 for i, (name, r) in enumerate(rations.items()):
     with st.expander(f"{i+1}. {name}", expanded=False):
         c1, c2, c3 = st.columns(3)
-        c1.metric("NEL, МДж",
-                  f"{r['total']['NEL']:.1f}",
+        c1.metric("NEL, МДж", f"{r['total']['NEL']:.1f}",
                   f"{r['total']['NEL'] - r['norms']['NEL']:+.1f}")
-        c2.metric("nXP, г",
-                  f"{r['total']['nXP']:.0f}",
+        c2.metric("nXP, г", f"{r['total']['nXP']:.0f}",
                   f"{r['total']['nXP'] - r['norms']['nXP']:+.0f}")
-        c3.metric("СВ, кг",
-                  f"{r['total']['dm']:.2f}",
+        c3.metric("СВ, кг", f"{r['total']['dm']:.2f}",
                   f"{r['total']['dm'] - r['norms']['DM']:+.2f}")
 
         st.dataframe(ration_to_dataframe(r), use_container_width=True)
@@ -406,6 +376,82 @@ for i, (name, r) in enumerate(rations.items()):
                        "; ".join(str(c) for c in r["corrections"]))
         else:
             st.success("Корректировки не требуются.")
+
+
+# ================== ✏️ РЕДАКТИРОВАНИЕ РАЦИОНА ==================
+st.header("✏️ Редактирование рациона")
+st.caption("Выберите образец и меняйте состав — баланс NEL, nXP и НДК "
+           "пересчитывается в реальном времени.")
+
+silo_inputs = {s["name"]: s for s in analysis["ratings"]}
+
+sel_name = st.selectbox(
+    "Образец для редактирования:",
+    list(rations.keys()),
+    key="edit_select",
+)
+
+base_r = rations[sel_name]
+comp = base_r["composition"]
+prefix = f"edit_{sel_name}_"
+
+col_reset, _ = st.columns([1, 4])
+with col_reset:
+    if st.button("🔄 Сбросить", help="Вернуть значения по умолчанию"):
+        for k in list(st.session_state.keys()):
+            if k.startswith(prefix):
+                del st.session_state[k]
+        st.rerun()
+
+c1, c2 = st.columns(2)
+with c1:
+    silo_dm = st.slider("Силос, кг СВ", 0.0, 30.0,
+                        float(comp["silo_dm"]), 0.1, key=prefix + "silo")
+    hay_dm = st.slider("Сено, кг СВ", 0.0, 10.0,
+                       float(comp["hay_dm"]), 0.1, key=prefix + "hay")
+    haylage_dm = st.slider("Сенаж, кг СВ", 0.0, 12.0,
+                           float(comp["haylage_dm"]), 0.1, key=prefix + "haylage")
+with c2:
+    conc_dm = st.slider("Комбикорм, кг СВ", 0.0, 15.0,
+                        float(comp["concentrate_dm"]), 0.1, key=prefix + "conc")
+    fat_kg = st.slider("Защищённый жир, кг", 0.0, 3.0,
+                       float(comp["fat_kg"]), 0.05, key=prefix + "fat")
+    soy_dm = st.slider("Соевый шрот, кг СВ", 0.0, 3.0,
+                       float(comp["soy_dm"]), 0.05, key=prefix + "soy")
+
+edited = calculate_ration(
+    silo=silo_inputs[sel_name],
+    live_weight=live_weight,
+    milk_yield=milk_yield,
+    custom={
+        "silo_dm": silo_dm,
+        "hay_dm": hay_dm,
+        "haylage_dm": haylage_dm,
+        "concentrate_dm": conc_dm,
+        "fat_kg": fat_kg,
+        "soy_dm": soy_dm,
+    },
+)
+
+e1, e2, e3, e4 = st.columns(4)
+e1.metric("NEL, МДж", f"{edited['total']['NEL']:.1f}",
+          f"{edited['total']['NEL'] - edited['norms']['NEL']:+.1f}")
+e2.metric("nXP, г", f"{edited['total']['nXP']:.0f}",
+          f"{edited['total']['nXP'] - edited['norms']['nXP']:+.0f}")
+e3.metric("СВ, кг", f"{edited['total']['dm']:.2f}",
+          f"{edited['total']['dm'] - edited['norms']['DM']:+.2f}")
+ndf_pct = (100 * edited["total"]["NDF"] / (edited["total"]["dm"] * 1000)
+           if edited["total"]["dm"] else 0)
+e4.metric("НДК, % от СВ", f"{ndf_pct:.1f}",
+          f"{ndf_pct - 32:+.1f} к норме 32%")
+
+st.dataframe(ration_to_dataframe(edited), use_container_width=True)
+
+# Сохранение отредактированной версии — чтобы попадала в PDF
+if st.button("💾 Использовать этот рацион в PDF", key="edit_apply_pdf"):
+    st.session_state["edited_ration"] = (sel_name, edited)
+    st.success(f"Рацион для «{sel_name}» сохранён — он попадёт в PDF-отчёт.")
+
 
 # ================== AI ==================
 st.header("🩺 Рекомендации зоотехника (ИИ)")
@@ -419,6 +465,7 @@ with st.spinner("Делается анализ..."):
     ai_text = get_ai_recommendation(context, force_refresh=refresh)
 
 st.markdown(ai_text)
+
 
 # ================== PDF ==================
 st.divider()
@@ -447,6 +494,7 @@ with col_dl:
             mime="application/pdf",
             use_container_width=True,
         )
+
 
 # ================== ПОДВАЛ ==================
 st.markdown("---")
