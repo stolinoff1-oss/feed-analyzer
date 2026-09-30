@@ -1,27 +1,9 @@
 import pandas as pd
 import numpy as np
-
-COLUMNS = {
-    "sample_id": "Номер образца", "feed_name": "Наименование корма", "location": "Местонахождения",
-    "DM": "Сухая масса, (г/кг) (DM)", "CP": "Сырой протеин (г/кг СВ) (Crude protein)",
-    "starch": "Крахмал (г/кг СВ) (Starch)", "sugar": "Сахар (г/кг СВ) (Sugar)",
-    "NDF": "Нейтрально-детергентная клетчатка (НДК) (г/кг СВ) (NDF)",
-    "ADF": "Кислотно-детергентная клетчатка (КДК) (г/кг СВ) (ADF)",
-    "ADL": "Кислотно-детергентный лингнин (КДЛ) (г/кг СВ) (ADL)",
-    "NDFd": "НДК-перевариваемость (%) (NDF digest.)", "dOM": "Переваримость ОВ (%) (Dig.OM)",
-    "NEL": "Чистая энергия лактации (МДж/кг СВ) (NEL)",
-    "NEL_VC": "Чистая энергия лактации с учетом переваримости ОВ (МДж/кг СВ) (NEL-VC)",
-    "ME": "Обменная энергия (МДж/кг СВ) (ME)", "nXP": "Усвоенный протеин (г/кг СВ) (nXP)",
-    "UDP": "Нерасщепляемый в рубце протеин (г/кг СВ) (UDP)",
-    "RNB": "Баланс азота в рубце (г/кг СВ) (RNB)", "structure": "Структурный показатель (Structure value)",
-    "NFC": "Неструктурные углеводы (г/кг СВ) (NFC)", "ash": "Сырая зола (г/кг СВ) (Crude ash)",
-    "fat": "Сырой жир (г/кг СВ) (Crude fat)", "CF": "Сырая клетчатка (г/кг СВ) (Crude fibre)",
-    "Cl": "Хлорид (г/кг СВ) (Clorine)",
-}
+import re
 
 
 def _num(x):
-    """Безопасно преобразует значение в float. Возвращает None для NaN/None/строк."""
     if x is None:
         return None
     try:
@@ -33,42 +15,88 @@ def _num(x):
         return None
 
 
+def _normalize(s: str) -> str:
+    """Убирает все виды пробелов и переводит в нижний регистр."""
+    s = str(s)
+    s = s.replace("\xa0", " ").replace("\u2009", " ").replace("\u202f", " ")
+    s = re.sub(r"\s+", " ", s)
+    return s.strip().lower()
+
+
+# Шаблоны: короткое имя → список подстрок (в нижнем регистре), по которым ищем колонку
+PATTERNS = {
+    "sample_id": ["номер образца"],
+    "feed_name": ["наименование корма"],
+    "location":  ["местонахождения"],
+    "DM":        ["сухая масса"],
+    "starch":    ["крахмал"],
+    "sugar":     ["сахар"],
+    "NDF":       ["нейтрально-детергентная клетчатка"],
+    "ADF":       ["кислотно-детергентная клетчатка"],
+    "ADL":       ["кислотно-детергентный лингнин"],
+    "NDFd":      ["ндк-перевариваемость", "ndf digest"],
+    "dOM":       ["переваримость ов"],
+    "NEL_VC":    ["nel-vc"],
+    "NEL":       ["чистая энергия лактации"],
+    "nXP":       ["(nxp)"],
+    "UDP":       ["(udp)"],
+    "RNB":       ["(rnb)"],
+    "structure": ["structure value"],
+    "NFC":       ["(nfc)"],
+    "ash":       ["сырая зола"],
+    "fat":       ["сырой жир"],
+    "CF":        ["сырая клетчатка"],
+    "Cl":        ["хлорид"],
+}
+
+
+def _find_cp_column(columns):
+    """Ищет колонку 'сырой протеин' НЕ total. Возвращает имя колонки или None."""
+    for col in columns:
+        c = _normalize(col)
+        if "protein" in c and "total" not in c and "общий" not in c:
+            return col
+    for col in columns:
+        c = _normalize(col)
+        if "сырой протеин" in c and "общий" not in c:
+            return col
+    return None
+
+
 def load_feed_data(path: str) -> pd.DataFrame:
     df = pd.read_excel(path, sheet_name="Результаты анализа", header=0)
-    # Нормализуем названия колонок: убираем пробелы, неразрывные пробелы, переносы строк
-    df.columns = [str(c).replace("\xa0", " ").strip() for c in df.columns]
 
-    # Строим карту для нечёткого сопоставления
+    # Сопоставление колонок
     rename_map = {}
-    for short, full in COLUMNS.items():
-        # Точное совпадение
-        if full in df.columns:
-            rename_map[full] = short
-            continue
-        # Мягкое совпадение по ключевому слову
+    used = set()
+
+    for short, keywords in PATTERNS.items():
         for col in df.columns:
-            if short == "DM" and "Сухая масса" in col:
-                rename_map[col] = short; break
-            if short == "CP" and "Crude protein" in col and "Total" not in col:
-                rename_map[col] = short; break
-            if short == "NEL_VC" and "NEL-VC" in col:
-                rename_map[col] = short; break
-            if short == "NEL" and col.endswith("(NEL)"):
-                rename_map[col] = short; break
-            if short == "nXP" and "(nXP)" in col:
-                rename_map[col] = short; break
-            if short == "RNB" and "(RNB)" in col:
-                rename_map[col] = short; break
-            if short == "NDF" and "НДК" in col:
-                rename_map[col] = short; break
-            if short == "ADF" and "КДК" in col:
-                rename_map[col] = short; break
+            if col in used:
+                continue
+            c = _normalize(col)
+            if any(kw in c for kw in keywords):
+                # NEL (не NEL-VC)
+                if short == "NEL" and "nel-vc" in c:
+                    continue
+                rename_map[col] = short
+                used.add(col)
+                break
+
+    # Отдельно ищем CP, чтобы не захватить "Total Crude protein"
+    cp_col = _find_cp_column([c for c in df.columns if c not in used])
+    if cp_col:
+        rename_map[cp_col] = "CP"
+        used.add(cp_col)
 
     df = df.rename(columns=rename_map)
-    keep = [c for c in COLUMNS.keys() if c in df.columns]
+
+    # Оставляем только известные колонки
+    keep = [c for c in PATTERNS.keys()] + ["CP"]
+    keep = [c for c in keep if c in df.columns]
     df = df[keep].copy()
 
-    # Числовые колонки
+    # Преобразуем в числа
     for col in df.columns:
         if col not in ("sample_id", "feed_name", "location"):
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -82,7 +110,8 @@ def analyze_feeds(df: pd.DataFrame) -> dict:
                     "NEL", "NEL_VC", "nXP", "RNB", "structure"]
 
     for _, row in df.iterrows():
-        sample = {"id": row.get("sample_id"), "name": row.get("location") or row.get("feed_name")}
+        sample = {"id": row.get("sample_id"),
+                  "name": row.get("location") or row.get("feed_name")}
         for k in numeric_keys:
             sample[k] = _num(row.get(k))
         result["samples"].append(sample)
@@ -94,13 +123,15 @@ def analyze_feeds(df: pd.DataFrame) -> dict:
         return (max if higher_better else min)(valid, key=lambda s: s[col])
 
     result["leaders"] = {
-        "max_CP": _leader("CP", True), "max_starch": _leader("starch", True),
-        "max_sugar": _leader("sugar", True), "min_NDF": _leader("NDF", False),
-        "max_dOM": _leader("dOM", True), "max_NEL_VC": _leader("NEL_VC", True),
-        "best_RNB": _leader("RNB", True),
+        "max_CP":     _leader("CP", True),
+        "max_starch": _leader("starch", True),
+        "max_sugar":  _leader("sugar", True),
+        "min_NDF":    _leader("NDF", False),
+        "max_dOM":    _leader("dOM", True),
+        "max_NEL_VC": _leader("NEL_VC", True),
+        "best_RNB":   _leader("RNB", True),
     }
 
-    # Балл
     for s in result["samples"]:
         score = 0.0
         if s["NEL_VC"] is not None: score += (s["NEL_VC"] - 6.5) * 30
@@ -120,9 +151,9 @@ def feeds_to_dataframe(result: dict) -> pd.DataFrame:
     for i, s in enumerate(result["ratings"], 1):
         rows.append({
             "Рейтинг": i, "Образец": s["name"], "Номер": s["id"],
-            "DM": s["DM"], "СП, г/кг": s["CP"], "Крахмал": s["starch"], "Сахар": s["sugar"],
-            "НДК": s["NDF"], "КДК": s["ADF"], "Перев. ОВ, %": s["dOM"],
-            "NEL": s["NEL"], "NEL-VC": s["NEL_VC"], "nXP": s["nXP"],
-            "RNB": s["RNB"], "Балл": s["score"],
+            "DM": s["DM"], "СП, г/кг": s["CP"], "Крахмал": s["starch"],
+            "Сахар": s["sugar"], "НДК": s["NDF"], "КДК": s["ADF"],
+            "Перев. ОВ, %": s["dOM"], "NEL": s["NEL"], "NEL-VC": s["NEL_VC"],
+            "nXP": s["nXP"], "RNB": s["RNB"], "Балл": s["score"],
         })
     return pd.DataFrame(rows)
