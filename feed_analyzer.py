@@ -123,7 +123,9 @@ def analyze_feeds(df: pd.DataFrame) -> dict:
         if s["RNB"]    is not None: score -= abs(s["RNB"] + 8) * 2
         s["score"] = round(score, 2)
 
-    result["ratings"] = sorted(result["samples"], key=lambda s: s["score"], reverse=True)
+    result["ratings"] = sorted(result["samples"],
+                                key=lambda s: s["score"],
+                                reverse=True)
     return result
 
 
@@ -137,4 +139,35 @@ def feeds_to_dataframe(result: dict) -> pd.DataFrame:
             "Перев. ОВ, %": s["dOM"], "NEL": s["NEL"], "NEL-VC": s["NEL_VC"],
             "nXP": s["nXP"], "RNB": s["RNB"], "Балл": s["score"],
         })
+    return pd.DataFrame(rows)
+
+
+def dataframe_from_input(samples: list) -> pd.DataFrame:
+    """Принимает список словарей с полями и возвращает DataFrame
+    в том же формате, что делает load_feed_data()."""
+    rows = []
+    for i, s in enumerate(samples, 1):
+        nel = _num(s.get("NEL"))
+        nel_vc = _num(s.get("NEL_VC"))
+        if nel_vc is None or nel_vc == 0:
+            nel_vc = nel
+
+        rows.append({
+            "sample_id": s.get("id") or f"M{i:03d}",
+            "feed_name": s.get("name") or f"Силос {i}",
+            "location": s.get("name") or f"Силос {i}",
+            "DM": _num(s.get("DM")),
+            "starch": _num(s.get("starch")),
+            "sugar": _num(s.get("sugar")),
+            "NDF": _num(s.get("NDF")),
+            "ADF": _num(s.get("ADF")),
+            "NDFd": _num(s.get("NDFd")),
+            "dOM": _num(s.get("dOM")),
+            "NEL": nel,
+            "NEL_VC": nel_vc,
+            "nXP": _num(s.get("nXP")),
+            "RNB": _num(s.get("RNB")),
+            "structure": _num(s.get("structure")),
+        })
+
     return pd.DataFrame(rows)
