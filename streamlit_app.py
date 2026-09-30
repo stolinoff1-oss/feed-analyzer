@@ -262,7 +262,7 @@ with col_a:
 
 context = build_context(analysis, rations, live_weight, milk_yield)
 
-with st.spinner("DeepSeek анализирует данные..."):
+with st.spinner("Анализ данных..."):
     ai_text = get_ai_recommendation(context, force_refresh=refresh)
 
 st.markdown(ai_text)
