@@ -1,4 +1,5 @@
 import os
+import base64
 import streamlit as st
 import pandas as pd
 import tempfile
@@ -12,6 +13,9 @@ from pdf_report import generate_pdf
 
 # === КОНТАКТ ===
 CONTACT_EMAIL = "viktar.hrechka@syngenta.com"
+
+# === РАЗМЕР ЛОГОТИПОВ (высота в пикселях) ===
+LOGO_HEIGHT = 60
 
 
 st.set_page_config(page_title="Анализ кормов", page_icon="🐄", layout="wide")
@@ -41,51 +45,57 @@ if not check_password():
     st.stop()
 
 
-# ================== ШАПКА: email справа ==================
-_, col_contact = st.columns([4, 1])
-with col_contact:
-    st.markdown(
-        f"<div style='text-align:right; color:#2C7A3E; font-size:13px; "
-        f"padding-top:8px;'>По всем вопросам:<br>"
-        f"<a href='mailto:{CONTACT_EMAIL}' "
-        f"style='color:#2C7A3E; text-decoration:underline;'>"
-        f"{CONTACT_EMAIL}</a></div>",
-        unsafe_allow_html=True,
-    )
+# ================== ЛОГОТИПЫ (base64, одинаковая высота) ==================
+def _img_base64(path):
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
 
 
-# ================== ЛОГОТИПЫ (3 шт., слева-направо) ==================
-def _show_logo(path, width=140):
-    """Показывает картинку, если файл существует в репозитории."""
-    if os.path.exists(path):
-        st.image(path, width=width)
+def _logo_html(path, height=LOGO_HEIGHT):
+    b64 = _img_base64(path)
+    if not b64:
+        return "<div></div>"
+    return (f'<img src="data:image/png;base64,{b64}" '
+            f'style="height:{height}px; max-width:100%; object-fit:contain;">')
 
 
-col_l1, col_l2, col_l3 = st.columns(3)
+l1 = _logo_html("logo1.png")
+l2 = _logo_html("logo2.png")
+l3 = _logo_html("logo3.png")
 
-with col_l1:
-    _show_logo("logo1.png", width=140)
-
-with col_l2:
-    st.markdown("<div style='text-align:center;'>", unsafe_allow_html=True)
-    _show_logo("logo2.png", width=140)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with col_l3:
-    st.markdown("<div style='text-align:right;'>", unsafe_allow_html=True)
-    _show_logo("logo3.png", width=140)
-    st.markdown("</div>", unsafe_allow_html=True)
-
+st.markdown(
+    f"""
+    <div style="display:flex; justify-content:space-between; align-items:center;
+                padding:14px 10px 0 10px; border-bottom:1px solid #ECF0F1;">
+        <div style="flex:0 0 25%; text-align:left;">{l1}</div>
+        <div style="flex:0 0 50%; text-align:center;">{l2}</div>
+        <div style="flex:0 0 25%; text-align:right;">{l3}</div>
+    </div>
+    <div style="text-align:right; color:#2C7A3E; font-size:12px;
+                padding:4px 10px 0 0;">
+        По всем вопросам:
+        <a href="mailto:{CONTACT_EMAIL}"
+           style="color:#2C7A3E; text-decoration:underline;">
+            {CONTACT_EMAIL}
+        </a>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ================== ЗАГОЛОВОК ==================
 st.markdown(
-    "<h1 style='text-align:center; color:#2C7A3E; margin-bottom:4px;'>"
+    "<h1 style='text-align:center; color:#2C7A3E; "
+    "margin-top:16px; margin-bottom:2px; font-size:32px;'>"
     "🐄 Анализ кормов и расчёт рационов</h1>",
     unsafe_allow_html=True,
 )
 st.markdown(
     "<p style='text-align:center; color:#7F8C8D; font-size:13px; "
-    "margin-top:0;'>Лабораторный анализ силоса • рекомендации по рациону "
+    "margin-top:0; margin-bottom:20px;'>"
+    "Лабораторный анализ силоса • рекомендации по рациону "
     "• оценка качества</p>",
     unsafe_allow_html=True,
 )
