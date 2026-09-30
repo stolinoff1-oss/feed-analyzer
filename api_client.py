@@ -1,4 +1,5 @@
 import requests
+import streamlit as st
 
 SYSTEM_PROMPT = """Ты — опытный зоотехник-консультант по кормлению молочного скота.
 Ты получаешь результаты лабораторного анализа кукурузного силоса и расчёт рациона.
@@ -12,17 +13,19 @@ SYSTEM_PROMPT = """Ты — опытный зоотехник-консульта
 AIAI_API_URL = "https://api.aiai.by/v1/chat/completions"
 AIAI_MODEL = "deepseek-chat"
 
-# ⚠️ ВНИМАНИЕ: ключ вписан прямо в код. Не публикуйте этот файл.
-# Как только всё заработает — перенесите ключ обратно в Secrets и удалите отсюда.
-AIAI_API_KEY = "sk-vedai-G53MsnSCnt_DyhamqM1VlTL4oJyRXRvM3GU5ImsnpaQ"
-
 
 def get_ai_recommendation(context: str) -> str:
-    if not AIAI_API_KEY or not AIAI_API_KEY.startswith("sk-"):
-        return "⚠️ API-ключ не задан в коде."
+    # Ключ читаем из Secrets (безопасно). В коде его больше нет.
+    api_key = st.secrets.get("AIAI_API_KEY", "")
+    if not api_key or not api_key.startswith("sk-"):
+        return (
+            "⚠️ API-ключ AIAI.BY не задан в Secrets.\n\n"
+            "Откройте Manage app → ⋮ → Settings → Secrets и добавьте строку:\n"
+            'AIAI_API_KEY = "sk-vedai-ваш-ключ"'
+        )
 
     headers = {
-        "Authorization": f"Bearer {AIAI_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
@@ -36,11 +39,11 @@ def get_ai_recommendation(context: str) -> str:
     try:
         r = requests.post(AIAI_API_URL, headers=headers, json=payload, timeout=120)
         if r.status_code == 401:
-            return f"❌ Ошибка 401: Неверный ключ.\nURL: {AIAI_API_URL}\nМодель: {AIAI_MODEL}\nОтвет сервера: {r.text[:400]}"
+            return "❌ Ошибка 401: Неверный ключ AIAI.BY. Проверьте Secrets."
         if r.status_code == 402:
             return "❌ Ошибка 402: Закончился баланс AIAI.BY."
         if r.status_code == 429:
-            return "❌ Ошибка 429: Слишком много запросов."
+            return "❌ Ошибка 429: Превышен лимит запросов."
         if r.status_code >= 400:
             return f"❌ Ошибка {r.status_code}: {r.text[:500]}"
         return r.json()["choices"][0]["message"]["content"]
