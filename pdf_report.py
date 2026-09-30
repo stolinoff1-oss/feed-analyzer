@@ -36,11 +36,11 @@ LIGHT = colors.HexColor("#ECF0F1")
 
 # =============== ОЧИСТКА ТЕКСТА ===============
 
-_MOJIBAKE_RE = re.compile(r"[ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ]")
+_MOJIBAKE_RE = re.compile(
+    r"[ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ]")
 
 
 def _fix_mojibake(s: str) -> str:
-    """Исправляет 'Ãèáðèä' → 'Гибрид' (Windows-1251 прочитанный как Latin-1)."""
     if not isinstance(s, str):
         return s
     if not _MOJIBAKE_RE.search(s):
@@ -57,15 +57,12 @@ def _fix_mojibake(s: str) -> str:
 
 
 def _clean_text(s: str) -> str:
-    """Убирает непечатные символы и мусор."""
     if not isinstance(s, str):
         s = str(s)
-    # Zero-width и bidi-маркеры
     s = re.sub(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]", "", s)
-    # Управляющие символы, кроме \n и \t
     s = "".join(ch for ch in s if ch.isprintable() or ch in "\n\t")
-    # Регионы Latin-1 Supplement (мусор от кракозябр)
-    s = re.sub(r"[\u00a1-\u00bf\u00c0-\u00ff]+", "", s)
+    s = re.sub(r"^[\u00a1-\u00ff\s]+", "", s)
+    s = re.sub(r"[\u00a1-\u00bf]+", " ", s)
     return s
 
 
@@ -119,7 +116,6 @@ def _grouped_chart(labels, series: dict, title):
 def _radar_chart(df: pd.DataFrame, top_n: int = 4):
     params = [
         ("NEL-VC", "NEL-VC", True),
-        ("СП", "СП, г/кг", True),
         ("Крахмал", "Крахмал", True),
         ("Сахар", "Сахар", True),
         ("Перев. ОВ", "Перев. ОВ, %", True),
@@ -179,7 +175,6 @@ def _md_to_story(text: str, styles):
         if not line:
             story.append(Spacer(1, 3))
             continue
-        # Пропускаем строки-таблицы markdown — выведем их отдельно
         if line.startswith("|") and line.endswith("|"):
             if re.match(r"^\|[\s\-:|]+\|$", line):
                 continue
@@ -312,20 +307,19 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
     # ---- 1. Сводная таблица ----
     story.append(Paragraph("1. Сводная таблица образцов", styles["pdf_h1"]))
     summary_data = [["№", "Образец", "Балл", "NEL-VC",
-                     "СП", "Крахмал", "НДК", "RNB"]]
+                     "Крахмал", "НДК", "RNB"]]
     for i, s in enumerate(analysis["ratings"], 1):
         summary_data.append([
             str(i), str(s["name"])[:22],
             f"{s['score']:.1f}" if s["score"] is not None else "—",
             f"{s['NEL_VC']:.2f}" if s["NEL_VC"] is not None else "—",
-            f"{s['CP']:.0f}" if s["CP"] is not None else "—",
             f"{s['starch']:.0f}" if s["starch"] is not None else "—",
             f"{s['NDF']:.0f}" if s["NDF"] is not None else "—",
             f"{s['RNB']:.1f}" if s["RNB"] is not None else "—",
         ])
     story.append(_make_table(summary_data,
-                              [10*mm, 42*mm, 15*mm, 18*mm,
-                               14*mm, 20*mm, 14*mm, 17*mm]))
+                              [12*mm, 46*mm, 18*mm, 22*mm,
+                               22*mm, 18*mm, 20*mm]))
     story.append(PageBreak())
 
     # ---- 2. Графики ----
@@ -335,7 +329,6 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
         "Образец": s["name"],
         "Балл": s["score"] or 0,
         "NEL-VC": s["NEL_VC"] or 0,
-        "СП, г/кг": s["CP"] or 0,
         "Крахмал": s["starch"] or 0,
         "Сахар": s["sugar"] or 0,
         "НДК": s["NDF"] or 0,
@@ -356,11 +349,11 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
                                     "NEL-VC (МДж/кг СВ)", color="#3498DB"),
                         width=170*mm, height=75*mm))
 
-    story.append(Paragraph("2.3 Сырой протеин", styles["pdf_h2"]))
-    df_cp = df.sort_values("СП, г/кг", ascending=False)
-    story.append(Image(_bar_chart(df_cp["Образец"].tolist(),
-                                    df_cp["СП, г/кг"].tolist(),
-                                    "СП (г/кг СВ)", color="#27AE60"),
+    story.append(Paragraph("2.3 Крахмал", styles["pdf_h2"]))
+    df_st = df.sort_values("Крахмал", ascending=False)
+    story.append(Image(_bar_chart(df_st["Образец"].tolist(),
+                                    df_st["Крахмал"].tolist(),
+                                    "Крахмал (г/кг СВ)", color="#F39C12"),
                         width=170*mm, height=75*mm))
     story.append(PageBreak())
 
