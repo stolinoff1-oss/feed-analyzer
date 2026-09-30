@@ -6,18 +6,15 @@ import tempfile
 import plotly.express as px
 import plotly.graph_objects as go
 
-from feed_analyzer import load_feed_data, analyze_feeds, feeds_to_dataframe
+from feed_analyzer import (load_feed_data, analyze_feeds,
+                            feeds_to_dataframe, dataframe_from_input)
 from ration_calculator import calculate_ration, ration_to_dataframe
 from api_client import get_ai_recommendation, build_context
 from pdf_report import generate_pdf
 
-# === КОНТАКТ ===
 CONTACT_EMAIL = "viktar.hrechka@syngenta.com"
-
-# === РАЗМЕР ЛОГОТИПОВ (высота в пикселях) ===
-LOGO_HEIGHT = 75          # высота крайних логотипов
-LOGO_HEIGHT_CENTER = 110  # высота среднего (кукуруза)
-
+LOGO_HEIGHT = 75
+LOGO_HEIGHT_CENTER = 110
 
 st.set_page_config(page_title="Анализ кормов", page_icon="🐄", layout="wide")
 
@@ -46,7 +43,7 @@ if not check_password():
     st.stop()
 
 
-# ================== ЛОГОТИПЫ (base64, одинаковая высота) ==================
+# ================== ЛОГОТИПЫ + EMAIL ==================
 def _img_base64(path):
     if not os.path.exists(path):
         return None
@@ -110,33 +107,141 @@ with st.sidebar:
     milk_yield = st.number_input("Удой, кг/сут", value=35.0, step=0.5)
 
 
-# ================== ЗАГРУЗКА ФАЙЛА ==================
-uploaded = st.file_uploader("Excel-файл с анализами (.xlsx)",
-                             type=["xlsx", "xls"])
-if uploaded is None:
-    st.info("👆 Загрузите файл с анализами кормов")
-    st.stop()
+# ================== ВЫБОР РЕЖИМА ==================
+mode = st.radio(
+    "Способ ввода данных:",
+    ["📁 Загрузить Excel-файл", "✍️ Ввести данные вручную"],
+    horizontal=True,
+)
 
-with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-    tmp.write(uploaded.read())
-    filepath = tmp.name
+df = None
 
+
+# ---------- Режим 1: Excel ----------
+if mode == "📁 Загрузить Excel-файл":
+    uploaded = st.file_uploader("Excel-файл с анализами (.xlsx)",
+                                 type=["xlsx", "xls"])
+    if uploaded is None:
+        st.info("👆 Загрузите файл с анализами кормов")
+        st.stop()
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp.write(uploaded.read())
+        filepath = tmp.name
+
+    try:
+        df = load_feed_data(filepath)
+    except Exception as e:
+        st.error(f"Ошибка чтения файла: {e}")
+        st.stop()
+
+
+# ---------- Режим 2: Ручной ввод ----------
+else:
+    n_silos = st.number_input(
+        "Сколько силосов добавить?",
+        min_value=1, max_value=30, value=3, step=1,
+        help="Введите число от 1 до 30. Для каждого силоса появится форма.",
+    )
+
+    st.caption("Заполните данные для каждого силоса. "
+               "Поля отмечены * обязательны.")
+
+    silos_data = []
+    for i in range(int(n_silos)):
+        with st.expander(f"🌽 Силос №{i+1}", expanded=(i == 0)):
+            name = st.text_input("Название *",
+                                  value=f"Силос {i+1}",
+                                  key=f"name_{i}")
+
+            c1, c2, c3 = st.columns(3)
+            dm = c1.number_input("Сухая масса, г/кг *",
+                                  min_value=100.0, max_value=700.0,
+                                  value=350.0, step=5.0, key=f"dm_{i}")
+            starch = c2.number_input("Крахмал, г/кг СВ",
+                                      min_value=0.0, max_value=700.0,
+                                      value=350.0, step=5.0, key=f"starch_{i}")
+            sugar = c3.number_input("Сахар, г/кг СВ",
+                                     min_value=0.0, max_value=300.0,
+                                     value=80.0, step=5.0, key=f"sugar_{i}")
+
+            c1, c2, c3 = st.columns(3)
+            ndf = c1.number_input("НДК, г/кг СВ",
+                                   min_value=0.0, max_value=700.0,
+                                   value=350.0, step=5.0, key=f"ndf_{i}")
+            adf = c2.number_input("КДК, г/кг СВ",
+                                   min_value=0.0, max_value=500.0,
+                                   value=180.0, step=5.0, key=f"adf_{i}")
+            dom = c3.number_input("Переваримость ОВ, %",
+                                   min_value=50.0, max_value=95.0,
+                                   value=80.0, step=0.5, key=f"dom_{i}")
+
+            c1, c2, c3 = st.columns(3)
+            nel = c1.number_input("NEL, МДж/кг СВ",
+                                   min_value=4.0, max_value=10.0,
+                                   value=7.0, step=0.1, key=f"nel_{i}")
+            nel_vc = c2.number_input(
+                "NEL-VC, МДж/кг СВ",
+                min_value=0.0, max_value=10.0,
+                value=0.0, step=0.1, key=f"nelvc_{i}",
+                help="Оставьте 0, чтобы использовать значение NEL",
+            )
+            nxp = c3.number_input("nXP, г/кг СВ",
+                                   min_value=0.0, max_value=300.0,
+                                   value=135.0, step=1.0, key=f"nxp_{i}")
+
+            c1, c2 = st.columns(2)
+            rnb = c1.number_input("RNB, г/кг СВ",
+                                   min_value=-30.0, max_value=30.0,
+                                   value=-10.0, step=0.5, key=f"rnb_{i}")
+            structure = c2.number_input("Структурный показатель",
+                                         min_value=0.5, max_value=3.0,
+                                         value=1.5, step=0.1,
+                                         key=f"struct_{i}")
+
+            silos_data.append({
+                "id": f"M{i+1:03d}",
+                "name": name,
+                "DM": dm,
+                "starch": starch,
+                "sugar": sugar,
+                "NDF": ndf,
+                "ADF": adf,
+                "dOM": dom,
+                "NEL": nel,
+                "NEL_VC": nel_vc,
+                "nXP": nxp,
+                "RNB": rnb,
+                "structure": structure,
+            })
+
+    if st.button("🔬 Рассчитать рационы", type="primary"):
+        st.session_state["manual_silos"] = silos_data
+        st.session_state["manual_count"] = int(n_silos)
+
+    # Проверяем, что данные сохранены и количество совпадает
+    if ("manual_silos" not in st.session_state
+            or st.session_state.get("manual_count") != int(n_silos)):
+        st.info("👆 Заполните данные и нажмите «Рассчитать рационы»")
+        st.stop()
+
+    df = dataframe_from_input(st.session_state["manual_silos"])
+
+
+# ================== ОБЩАЯ ЛОГИКА ==================
 try:
-    df = load_feed_data(filepath)
     analysis = analyze_feeds(df)
     df_analysis = feeds_to_dataframe(analysis)
 except Exception as e:
-    st.error(f"Ошибка чтения файла: {e}")
+    st.error(f"Ошибка обработки данных: {e}")
     st.stop()
 
-st.success(f"Загружено {len(df)} образцов")
+st.success(f"Обработано {len(df)} образцов")
 
 # ================== ВИЗУАЛИЗАЦИЯ ==================
 st.header("📊 Визуализация")
-
 chart_df = df_analysis.copy()
 
-# --- Рейтинг ---
 st.subheader("Рейтинг по баллу качества")
 if chart_df["Балл"].notna().any():
     fig_rating = px.bar(
@@ -150,10 +255,7 @@ if chart_df["Балл"].notna().any():
     fig_rating.update_layout(showlegend=False, coloraxis_showscale=False,
                               margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig_rating, use_container_width=True)
-else:
-    st.warning("Нет данных для построения рейтинга.")
 
-# --- Энергия ---
 st.subheader("Энергия: NEL-VC (МДж/кг СВ)")
 if chart_df["NEL-VC"].notna().any():
     fig_nel = px.bar(
@@ -168,7 +270,6 @@ if chart_df["NEL-VC"].notna().any():
                            margin=dict(l=10, r=10, t=10, b=10))
     st.plotly_chart(fig_nel, use_container_width=True)
 
-# --- Углеводы ---
 st.subheader("Углеводный баланс: крахмал, сахар, НДК")
 fig_carbs = go.Figure()
 fig_carbs.add_trace(go.Bar(name="Крахмал", x=chart_df["Образец"],
@@ -184,9 +285,7 @@ fig_carbs.update_layout(barmode="group", height=400,
                                      y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig_carbs, use_container_width=True)
 
-# --- Radar ---
 st.subheader("Профиль образцов (радар)")
-
 radar_params = {
     "NEL-VC":     ("NEL-VC", True),
     "Крахмал":    ("Крахмал", True),
@@ -240,11 +339,10 @@ if not radar_df.empty and len(radar_df.columns) >= 3:
     st.plotly_chart(fig_radar, use_container_width=True)
     st.caption("Показаны 3 лучших образца и 1 худший для сравнения.")
 
-# --- Таблица ---
+# ================== ТАБЛИЦА ==================
 st.header("📋 Рейтинг образцов (таблица)")
 st.dataframe(df_analysis, use_container_width=True)
 
-# --- Лидеры ---
 st.header("🏆 Лидеры по категориям")
 leaders = analysis["leaders"]
 cols = st.columns(3)
@@ -288,7 +386,6 @@ st.subheader("Сводная таблица по всем образцам")
 st.dataframe(summary_df, use_container_width=True)
 
 st.subheader("Детализация по образцам")
-
 for i, (name, r) in enumerate(rations.items()):
     with st.expander(f"{i+1}. {name}", expanded=False):
         c1, c2, c3 = st.columns(3)
@@ -312,7 +409,6 @@ for i, (name, r) in enumerate(rations.items()):
 
 # ================== AI ==================
 st.header("🩺 Рекомендации зоотехника (ИИ)")
-
 col_a, col_b = st.columns([1, 4])
 with col_a:
     refresh = st.button("🔄 Обновить")
@@ -331,7 +427,6 @@ st.caption("Содержит: сводную таблицу, все график
            "рационы для всех образцов, выводы ИИ.")
 
 col_btn, col_dl = st.columns(2)
-
 with col_btn:
     if st.button("📄 Подготовить PDF-отчёт", use_container_width=True):
         with st.spinner("Собираем PDF..."):
@@ -352,7 +447,6 @@ with col_dl:
             mime="application/pdf",
             use_container_width=True,
         )
-
 
 # ================== ПОДВАЛ ==================
 st.markdown("---")
