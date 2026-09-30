@@ -16,14 +16,12 @@ def _num(x):
 
 
 def _normalize(s: str) -> str:
-    """Убирает все виды пробелов и переводит в нижний регистр."""
     s = str(s)
     s = s.replace("\xa0", " ").replace("\u2009", " ").replace("\u202f", " ")
     s = re.sub(r"\s+", " ", s)
     return s.strip().lower()
 
 
-# Шаблоны: короткое имя → список подстрок (в нижнем регистре), по которым ищем колонку
 PATTERNS = {
     "sample_id": ["номер образца"],
     "feed_name": ["наименование корма"],
@@ -50,15 +48,29 @@ PATTERNS = {
 }
 
 
-def _find_cp_column(columns):
-    """Ищет колонку 'сырой протеин' НЕ total. Возвращает имя колонки или None."""
+def _find_cp_column(columns, exclude=None):
+    """Ищет колонку 'Сырой протеин' (НЕ Total). Максимально толерантно."""
+    exclude = set(exclude or [])
+    # Приоритет 1: точное совпадение с 'Crude protein)' (не 'Total Crude protein)')
     for col in columns:
+        if col in exclude:
+            continue
         c = _normalize(col)
-        if "protein" in c and "total" not in c and "общий" not in c:
+        if "сырой протеин" in c and "общий" not in c and "total" not in c:
             return col
+    # Приоритет 2: любая, где есть 'протеин' и '(г/кг', но нет 'общий'/'total'
     for col in columns:
+        if col in exclude:
+            continue
         c = _normalize(col)
-        if "сырой протеин" in c and "общий" not in c:
+        if "протеин" in c and "г/кг" in c and "общий" not in c and "total" not in c:
+            return col
+    # Приоритет 3: любая со словом 'протеин' без 'общий'/'total'
+    for col in columns:
+        if col in exclude:
+            continue
+        c = _normalize(col)
+        if "протеин" in c and "общий" not in c and "total" not in c:
             return col
     return None
 
@@ -66,7 +78,6 @@ def _find_cp_column(columns):
 def load_feed_data(path: str) -> pd.DataFrame:
     df = pd.read_excel(path, sheet_name="Результаты анализа", header=0)
 
-    # Сопоставление колонок
     rename_map = {}
     used = set()
 
@@ -76,27 +87,24 @@ def load_feed_data(path: str) -> pd.DataFrame:
                 continue
             c = _normalize(col)
             if any(kw in c for kw in keywords):
-                # NEL (не NEL-VC)
                 if short == "NEL" and "nel-vc" in c:
                     continue
                 rename_map[col] = short
                 used.add(col)
                 break
 
-    # Отдельно ищем CP, чтобы не захватить "Total Crude protein"
-    cp_col = _find_cp_column([c for c in df.columns if c not in used])
+    # Отдельно ищем CP
+    cp_col = _find_cp_column(df.columns, exclude=used)
     if cp_col:
         rename_map[cp_col] = "CP"
         used.add(cp_col)
 
     df = df.rename(columns=rename_map)
 
-    # Оставляем только известные колонки
     keep = [c for c in PATTERNS.keys()] + ["CP"]
     keep = [c for c in keep if c in df.columns]
     df = df[keep].copy()
 
-    # Преобразуем в числа
     for col in df.columns:
         if col not in ("sample_id", "feed_name", "location"):
             df[col] = pd.to_numeric(df[col], errors="coerce")
