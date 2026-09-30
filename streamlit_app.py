@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import tempfile
+import plotly.express as px
+import plotly.graph_objects as go
+
 from feed_analyzer import load_feed_data, analyze_feeds, feeds_to_dataframe
 from ration_calculator import calculate_ration, ration_to_dataframe
 from api_client import get_ai_recommendation, build_context
@@ -59,8 +62,127 @@ except Exception as e:
 
 st.success(f"Загружено {len(df)} образцов")
 
-# --- Рейтинг ---
-st.header("📊 Рейтинг образцов")
+# ================== ВИЗУАЛИЗАЦИЯ ==================
+st.header("📊 Визуализация")
+
+# Готовим данные для графиков
+chart_df = df_analysis.copy()
+
+# --- График 1: Рейтинг (горизонтальный бар) ---
+st.subheader("Рейтинг по баллу качества")
+fig_rating = px.bar(
+    chart_df.sort_values("Балл"),
+    x="Балл", y="Образец", orientation="h",
+    color="Балл", color_continuous_scale="RdYlGn",
+    text="Балл",
+    title=None, height=350,
+)
+fig_rating.update_traces(texttemplate="%{text:.1f}", textposition="outside")
+fig_rating.update_layout(showlegend=False, coloraxis_showscale=False,
+                          margin=dict(l=10, r=10, t=10, b=10))
+st.plotly_chart(fig_rating, use_container_width=True)
+
+# --- График 2: Энергия (NEL-VC) ---
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("Энергия: NEL-VC (МДж/кг СВ)")
+    fig_nel = px.bar(
+        chart_df.sort_values("NEL-VC", ascending=False),
+        x="Образец", y="NEL-VC",
+        color="NEL-VC", color_continuous_scale="Blues",
+        text="NEL-VC", height=350,
+    )
+    fig_nel.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+    fig_nel.update_layout(coloraxis_showscale=False, xaxis_tickangle=-45,
+                           margin=dict(l=10, r=10, t=10, b=10))
+    st.plotly_chart(fig_nel, use_container_width=True)
+
+with col2:
+    st.subheader("Протеин: СП (г/кг СВ)")
+    fig_cp = px.bar(
+        chart_df.sort_values("СП, г/кг", ascending=False),
+        x="Образец", y="СП, г/кг",
+        color="СП, г/кг", color_continuous_scale="Greens",
+        text="СП, г/кг", height=350,
+    )
+    fig_cp.update_traces(texttemplate="%{text:.0f}", textposition="outside")
+    fig_cp.update_layout(coloraxis_showscale=False, xaxis_tickangle=-45,
+                          margin=dict(l=10, r=10, t=10, b=10))
+    st.plotly_chart(fig_cp, use_container_width=True)
+
+# --- График 3: Углеводы (крахмал vs сахар vs НДК) ---
+st.subheader("Углеводный баланс: крахмал, сахар, НДК")
+fig_carbs = go.Figure()
+fig_carbs.add_trace(go.Bar(name="Крахмал", x=chart_df["Образец"],
+                            y=chart_df["Крахмал"], marker_color="#F39C12"))
+fig_carbs.add_trace(go.Bar(name="Сахар", x=chart_df["Образец"],
+                            y=chart_df["Сахар"], marker_color="#E74C3C"))
+fig_carbs.add_trace(go.Bar(name="НДК", x=chart_df["Образец"],
+                            y=chart_df["НДК"], marker_color="#27AE60"))
+fig_carbs.update_layout(barmode="group", height=400,
+                         xaxis_tickangle=-45,
+                         margin=dict(l=10, r=10, t=10, b=10),
+                         legend=dict(orientation="h", yanchor="bottom",
+                                     y=1.02, xanchor="right", x=1))
+st.plotly_chart(fig_carbs, use_container_width=True)
+
+# --- График 4: Radar (паутина) ---
+st.subheader("Профиль образцов (радар)")
+
+# Параметры для радара — нормализуем к 0..100
+radar_params = {
+    "NEL-VC": ("NEL-VC", True),
+    "СП":     ("СП, г/кг", True),
+    "Крахмал": ("Крахмал", True),
+    "Сахар":  ("Сахар", True),
+    "Перев. ОВ": ("Перев. ОВ, %", True),
+    "Низкий НДК": ("НДК", False),  # инвертируем: чем меньше, тем лучше
+    "RNB":    ("RNB", True),       # ближе к нулю — лучше
+}
+radar_df = pd.DataFrame()
+for label, (col, higher_better) in radar_params.items():
+    vals = pd.to_numeric(chart_df[col], errors="coerce").fillna(0)
+    if col == "RNB":
+        # Ближе к нулю = лучше. Инвертируем по модулю.
+        score = 100 - (vals.abs() - vals.abs().min()) / \
+                (vals.abs().max() - vals.abs().min() + 1e-9) * 100
+    elif higher_better:
+        score = (vals - vals.min()) / (vals.max() - vals.min() + 1e-9) * 100
+    else:
+        score = (vals.max() - vals) / (vals.max() - vals.min() + 1e-9) * 100
+    radar_df[label] = score
+
+fig_radar = go.Figure()
+# Показываем топ-3 и худший для контраста
+top_names = chart_df["Образец"].head(3).tolist()
+bottom_name = chart_df["Образец"].iloc[-1]
+show_samples = top_names + [bottom_name]
+palette = ["#2ECC71", "#3498DB", "#F39C12", "#E74C3C"]
+
+for i, name in enumerate(show_samples):
+    idx = chart_df[chart_df["Образец"] == name].index[0]
+    values = radar_df.loc[idx].tolist()
+    fig_radar.add_trace(go.Scatterpolar(
+        r=values + [values[0]],
+        theta=list(radar_df.columns) + [list(radar_df.columns)[0]],
+        fill="toself",
+        name=name,
+        line=dict(color=palette[i % len(palette)]),
+        opacity=0.6,
+    ))
+
+fig_radar.update_layout(
+    polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+    height=500, showlegend=True,
+    margin=dict(l=40, r=40, t=40, b=40),
+)
+st.plotly_chart(fig_radar, use_container_width=True)
+st.caption("Показаны 3 лучших образца и 1 худший для сравнения. "
+           "Чем больше площадь — тем лучше профиль.")
+
+# --- Таблица рейтинга ---
+st.header("📋 Рейтинг образцов (таблица)")
 st.dataframe(df_analysis, use_container_width=True)
 
 # --- Лидеры ---
@@ -78,33 +200,65 @@ for col, (key, label, field) in zip(cols, metrics):
     if s:
         col.metric(label, s["name"], f"{s.get(field)}")
 
-# --- Рационы ---
-st.header("🍽️ Расчёт рационов (топ-2 образца)")
+# ================== РАСЧЁТ РАЦИОНОВ ДЛЯ ВСЕХ ОБРАЗЦОВ ==================
+st.header("🍽️ Расчёт рационов для всех образцов")
+
 rations = {}
-for s in analysis["ratings"][:2]:
+for s in analysis["ratings"]:
     r = calculate_ration(s, live_weight, milk_yield)
     rations[s["name"]] = r
 
+# Сводная таблица «образец → норма / факт»
+summary_rows = []
 for name, r in rations.items():
-    with st.expander(f"Рацион: {name}", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        col1.metric("NEL, МДж", f"{r['total']['NEL']:.1f}",
-                    f"{r['total']['NEL'] - r['norms']['NEL']:+.1f}")
-        col2.metric("nXP, г", f"{r['total']['nXP']:.0f}",
-                    f"{r['total']['nXP'] - r['norms']['nXP']:+.0f}")
-        col3.metric("СВ, кг", f"{r['total']['dm']:.1f}",
-                    f"{r['total']['dm'] - r['norms']['DM']:+.1f}")
-        st.dataframe(ration_to_dataframe(r), use_container_width=True)
-        if r["corrections"]:
-            st.warning("Корректировки: " + "; ".join(str(c) for c in r["corrections"]))
+    summary_rows.append({
+        "Образец": name,
+        "NEL, МДж": round(r["total"]["NEL"], 1),
+        "Норма NEL": r["norms"]["NEL"],
+        "Δ NEL": round(r["total"]["NEL"] - r["norms"]["NEL"], 1),
+        "nXP, г": round(r["total"]["nXP"], 0),
+        "Норма nXP": r["norms"]["nXP"],
+        "Δ nXP": round(r["total"]["nXP"] - r["norms"]["nXP"], 0),
+        "СВ, кг": round(r["total"]["dm"], 2),
+        "Корректировок": len(r["corrections"]),
+    })
+summary_df = pd.DataFrame(summary_rows)
 
-# --- AI-рекомендации ---
+st.subheader("Сводная таблица по всем образцам")
+st.dataframe(summary_df, use_container_width=True)
+
+# --- Детальные рационы ---
+st.subheader("Детализация по образцам")
+st.caption("Нажмите на любой образец, чтобы увидеть полный рацион.")
+
+for i, (name, r) in enumerate(rations.items()):
+    with st.expander(f"{i+1}. {name}", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("NEL, МДж",
+                  f"{r['total']['NEL']:.1f}",
+                  f"{r['total']['NEL'] - r['norms']['NEL']:+.1f}")
+        c2.metric("nXP, г",
+                  f"{r['total']['nXP']:.0f}",
+                  f"{r['total']['nXP'] - r['norms']['nXP']:+.0f}")
+        c3.metric("СВ, кг",
+                  f"{r['total']['dm']:.2f}",
+                  f"{r['total']['dm'] - r['norms']['DM']:+.2f}")
+
+        st.dataframe(ration_to_dataframe(r), use_container_width=True)
+
+        if r["corrections"]:
+            st.warning("Корректировки: " +
+                       "; ".join(str(c) for c in r["corrections"]))
+        else:
+            st.success("Корректировки не требуются.")
+
+# ================== AI-РЕКОМЕНДАЦИИ ==================
 st.header("🩺 Рекомендации зоотехника (ИИ)")
 
-# Кнопка принудительного обновления
 col_a, col_b = st.columns([1, 4])
 with col_a:
-    refresh = st.button("🔄 Обновить", help="Сгенерировать рекомендации заново")
+    refresh = st.button("🔄 Обновить",
+                        help="Сгенерировать рекомендации заново")
 
 context = build_context(analysis, rations, live_weight, milk_yield)
 
@@ -113,21 +267,24 @@ with st.spinner("DeepSeek анализирует данные..."):
 
 st.markdown(ai_text)
 
-# --- Скачивание отчёта ---
+# ================== СКАЧИВАНИЕ ОТЧЁТА ==================
 st.divider()
 st.header("📥 Скачать отчёт")
 
 out_path = tempfile.mktemp(suffix=".xlsx")
 with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
-    df_analysis.to_excel(writer, sheet_name="Анализ", index=False)
+    df_analysis.to_excel(writer, sheet_name="Рейтинг", index=False)
+    summary_df.to_excel(writer, sheet_name="Сводка рационов", index=False)
     for name, r in rations.items():
-        safe = str(name)[:25].replace("/", "_")
-        ration_to_dataframe(r).to_excel(writer, sheet_name=f"Рацион_{safe}", index=False)
+        safe = str(name)[:25].replace("/", "_").replace("\\", "_")
+        ration_to_dataframe(r).to_excel(
+            writer, sheet_name=f"Рацион_{safe}", index=False
+        )
 
 with open(out_path, "rb") as f:
     st.download_button(
-        "📥 Скачать Excel-отчёт",
+        "📥 Скачать Excel-отчёт (все образцы)",
         data=f,
-        file_name="feed_report.xlsx",
+        file_name="feed_report_full.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
