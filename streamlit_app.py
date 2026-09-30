@@ -4,9 +4,7 @@ import tempfile
 import plotly.express as px
 import plotly.graph_objects as go
 
-from feed_analyzer import (
-    load_feed_data, analyze_feeds, feeds_to_dataframe, debug_columns,
-)
+from feed_analyzer import load_feed_data, analyze_feeds, feeds_to_dataframe
 from ration_calculator import calculate_ration, ration_to_dataframe
 from api_client import get_ai_recommendation, build_context
 from pdf_report import generate_pdf
@@ -39,13 +37,11 @@ if not check_password():
 
 st.title("🐄 Анализ кормов и расчёт рационов")
 
-# --- Боковая панель ---
 with st.sidebar:
     st.header("Параметры коровы")
     live_weight = st.number_input("Живая масса, кг", value=650, step=10)
     milk_yield = st.number_input("Удой, кг/сут", value=35.0, step=0.5)
 
-# --- Загрузка файла ---
 uploaded = st.file_uploader("Excel-файл с анализами (.xlsx)", type=["xlsx", "xls"])
 if uploaded is None:
     st.info("👆 Загрузите файл с анализами кормов")
@@ -65,28 +61,12 @@ except Exception as e:
 
 st.success(f"Загружено {len(df)} образцов")
 
-# ================== ОТЛАДКА ==================
-with st.expander("🔧 Отладка: сопоставление колонок Excel → параметры",
-                 expanded=True):
-    st.caption(
-        "Слева — как колонка называется в Excel. "
-        "Справа — под каким именем её видит программа. "
-        "Если справа «None», значит эта колонка не попадает в анализ."
-    )
-    try:
-        mapping = debug_columns(filepath)
-        dbg_df = pd.DataFrame(mapping, columns=["Колонка в Excel",
-                                                 "Распознано как"])
-        st.dataframe(dbg_df, use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.error(f"Ошибка отладки: {e}")
-
 # ================== ВИЗУАЛИЗАЦИЯ ==================
 st.header("📊 Визуализация")
 
 chart_df = df_analysis.copy()
 
-# --- График 1: Рейтинг ---
+# --- Рейтинг ---
 st.subheader("Рейтинг по баллу качества")
 if chart_df["Балл"].notna().any():
     fig_rating = px.bar(
@@ -103,45 +83,22 @@ if chart_df["Балл"].notna().any():
 else:
     st.warning("Нет данных для построения рейтинга.")
 
-# --- Графики 2 и 3: NEL-VC и СП ---
-col1, col2 = st.columns(2)
+# --- Энергия ---
+st.subheader("Энергия: NEL-VC (МДж/кг СВ)")
+if chart_df["NEL-VC"].notna().any():
+    fig_nel = px.bar(
+        chart_df.sort_values("NEL-VC", ascending=False),
+        x="Образец", y="NEL-VC",
+        color="NEL-VC", color_continuous_scale="Blues",
+        text="NEL-VC", height=350,
+    )
+    fig_nel.update_traces(texttemplate="%{text:.2f}",
+                           textposition="outside")
+    fig_nel.update_layout(coloraxis_showscale=False, xaxis_tickangle=-45,
+                           margin=dict(l=10, r=10, t=10, b=10))
+    st.plotly_chart(fig_nel, use_container_width=True)
 
-with col1:
-    st.subheader("Энергия: NEL-VC (МДж/кг СВ)")
-    if chart_df["NEL-VC"].notna().any():
-        fig_nel = px.bar(
-            chart_df.sort_values("NEL-VC", ascending=False),
-            x="Образец", y="NEL-VC",
-            color="NEL-VC", color_continuous_scale="Blues",
-            text="NEL-VC", height=350,
-        )
-        fig_nel.update_traces(texttemplate="%{text:.2f}",
-                               textposition="outside")
-        fig_nel.update_layout(coloraxis_showscale=False, xaxis_tickangle=-45,
-                               margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_nel, use_container_width=True)
-    else:
-        st.warning("Нет данных NEL-VC.")
-
-with col2:
-    st.subheader("Протеин: СП (г/кг СВ)")
-    if chart_df["СП, г/кг"].notna().any():
-        fig_cp = px.bar(
-            chart_df.sort_values("СП, г/кг", ascending=False),
-            x="Образец", y="СП, г/кг",
-            color="СП, г/кг", color_continuous_scale="Greens",
-            text="СП, г/кг", height=350,
-        )
-        fig_cp.update_traces(texttemplate="%{text:.0f}",
-                              textposition="outside")
-        fig_cp.update_layout(coloraxis_showscale=False, xaxis_tickangle=-45,
-                              margin=dict(l=10, r=10, t=10, b=10))
-        st.plotly_chart(fig_cp, use_container_width=True)
-    else:
-        st.warning("Колонка «Сырой протеин» не распознана — "
-                   "проверьте отладку выше.")
-
-# --- График 4: Углеводы ---
+# --- Углеводы ---
 st.subheader("Углеводный баланс: крахмал, сахар, НДК")
 fig_carbs = go.Figure()
 fig_carbs.add_trace(go.Bar(name="Крахмал", x=chart_df["Образец"],
@@ -157,12 +114,11 @@ fig_carbs.update_layout(barmode="group", height=400,
                                      y=1.02, xanchor="right", x=1))
 st.plotly_chart(fig_carbs, use_container_width=True)
 
-# --- График 5: Radar ---
+# --- Radar ---
 st.subheader("Профиль образцов (радар)")
 
 radar_params = {
     "NEL-VC":     ("NEL-VC", True),
-    "СП":         ("СП, г/кг", True),
     "Крахмал":    ("Крахмал", True),
     "Сахар":      ("Сахар", True),
     "Перев. ОВ":  ("Перев. ОВ, %", True),
@@ -212,21 +168,17 @@ if not radar_df.empty and len(radar_df.columns) >= 3:
         margin=dict(l=40, r=40, t=40, b=40),
     )
     st.plotly_chart(fig_radar, use_container_width=True)
-    st.caption("Показаны 3 лучших образца и 1 худший для сравнения. "
-               "Чем больше площадь — тем лучше профиль.")
-else:
-    st.warning("Недостаточно данных для радара.")
+    st.caption("Показаны 3 лучших образца и 1 худший для сравнения.")
 
-# --- Таблица рейтинга ---
+# --- Таблица ---
 st.header("📋 Рейтинг образцов (таблица)")
 st.dataframe(df_analysis, use_container_width=True)
 
-# --- Лидеры ---
+# --- Лидеры (без СП) ---
 st.header("🏆 Лидеры по категориям")
 leaders = analysis["leaders"]
-cols = st.columns(4)
+cols = st.columns(3)
 metrics = [
-    ("max_CP", "Макс. протеин", "CP"),
     ("max_starch", "Макс. крахмал", "starch"),
     ("max_NEL_VC", "Макс. NEL-VC", "NEL_VC"),
     ("best_RNB", "Лучший RNB", "RNB"),
@@ -239,7 +191,7 @@ for col, (key, label, field) in zip(cols, metrics):
     else:
         col.metric(label, "—", "")
 
-# ================== РАСЧЁТ РАЦИОНОВ ДЛЯ ВСЕХ ОБРАЗЦОВ ==================
+# ================== РАЦИОНЫ ==================
 st.header("🍽️ Расчёт рационов для всех образцов")
 
 rations = {}
@@ -266,7 +218,6 @@ st.subheader("Сводная таблица по всем образцам")
 st.dataframe(summary_df, use_container_width=True)
 
 st.subheader("Детализация по образцам")
-st.caption("Нажмите на любой образец, чтобы увидеть полный рацион.")
 
 for i, (name, r) in enumerate(rations.items()):
     with st.expander(f"{i+1}. {name}", expanded=False):
@@ -289,13 +240,12 @@ for i, (name, r) in enumerate(rations.items()):
         else:
             st.success("Корректировки не требуются.")
 
-# ================== AI-РЕКОМЕНДАЦИИ ==================
+# ================== AI ==================
 st.header("🩺 Рекомендации зоотехника (ИИ)")
 
 col_a, col_b = st.columns([1, 4])
 with col_a:
-    refresh = st.button("🔄 Обновить",
-                        help="Сгенерировать рекомендации заново")
+    refresh = st.button("🔄 Обновить")
 
 context = build_context(analysis, rations, live_weight, milk_yield)
 
@@ -304,10 +254,9 @@ with st.spinner("Делается анализ..."):
 
 st.markdown(ai_text)
 
-# ================== СКАЧИВАНИЕ PDF-ОТЧЁТА ==================
+# ================== PDF ==================
 st.divider()
 st.header("📄 PDF-отчёт")
-
 st.caption("Содержит: сводную таблицу, все графики, "
            "рационы для всех образцов, выводы ИИ.")
 
