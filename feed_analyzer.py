@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 COLUMNS = {
     "sample_id": "Номер образца", "feed_name": "Наименование корма", "location": "Местонахождения",
@@ -18,28 +19,78 @@ COLUMNS = {
     "Cl": "Хлорид (г/кг СВ) (Clorine)",
 }
 
+
+def _num(x):
+    """Безопасно преобразует значение в float. Возвращает None для NaN/None/строк."""
+    if x is None:
+        return None
+    try:
+        f = float(x)
+        if np.isnan(f):
+            return None
+        return f
+    except (TypeError, ValueError):
+        return None
+
+
 def load_feed_data(path: str) -> pd.DataFrame:
     df = pd.read_excel(path, sheet_name="Результаты анализа", header=0)
-    rename_map = {v: k for k, v in COLUMNS.items()}
+    # Нормализуем названия колонок: убираем пробелы, неразрывные пробелы, переносы строк
+    df.columns = [str(c).replace("\xa0", " ").strip() for c in df.columns]
+
+    # Строим карту для нечёткого сопоставления
+    rename_map = {}
+    for short, full in COLUMNS.items():
+        # Точное совпадение
+        if full in df.columns:
+            rename_map[full] = short
+            continue
+        # Мягкое совпадение по ключевому слову
+        for col in df.columns:
+            if short == "DM" and "Сухая масса" in col:
+                rename_map[col] = short; break
+            if short == "CP" and "Crude protein" in col and "Total" not in col:
+                rename_map[col] = short; break
+            if short == "NEL_VC" and "NEL-VC" in col:
+                rename_map[col] = short; break
+            if short == "NEL" and col.endswith("(NEL)"):
+                rename_map[col] = short; break
+            if short == "nXP" and "(nXP)" in col:
+                rename_map[col] = short; break
+            if short == "RNB" and "(RNB)" in col:
+                rename_map[col] = short; break
+            if short == "NDF" and "НДК" in col:
+                rename_map[col] = short; break
+            if short == "ADF" and "КДК" in col:
+                rename_map[col] = short; break
+
     df = df.rename(columns=rename_map)
     keep = [c for c in COLUMNS.keys() if c in df.columns]
     df = df[keep].copy()
+
+    # Числовые колонки
     for col in df.columns:
         if col not in ("sample_id", "feed_name", "location"):
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
     return df.dropna(subset=["sample_id"]).reset_index(drop=True)
+
 
 def analyze_feeds(df: pd.DataFrame) -> dict:
     result = {"samples": [], "leaders": {}, "ratings": []}
+    numeric_keys = ["DM", "CP", "starch", "sugar", "NDF", "ADF", "NDFd", "dOM",
+                    "NEL", "NEL_VC", "nXP", "RNB", "structure"]
+
     for _, row in df.iterrows():
-        sample = {k: row.get(k) for k in ["sample_id", "feed_name", "location", "DM", "CP", "starch", "sugar", "NDF", "ADF", "NDFd", "dOM", "NEL", "NEL_VC", "nXP", "RNB", "structure"]}
-        sample["name"] = sample.get("location") or sample.get("feed_name")
-        sample["id"] = sample.get("sample_id")
+        sample = {"id": row.get("sample_id"), "name": row.get("location") or row.get("feed_name")}
+        for k in numeric_keys:
+            sample[k] = _num(row.get(k))
         result["samples"].append(sample)
 
     def _leader(col, higher_better=True):
-        valid = [s for s in result["samples"] if s.get(col) is not None and not pd.isna(s.get(col))]
-        if not valid: return None
+        valid = [s for s in result["samples"] if s.get(col) is not None]
+        if not valid:
+            return None
         return (max if higher_better else min)(valid, key=lambda s: s[col])
 
     result["leaders"] = {
@@ -49,21 +100,29 @@ def analyze_feeds(df: pd.DataFrame) -> dict:
         "best_RNB": _leader("RNB", True),
     }
 
+    # Балл
     for s in result["samples"]:
-        score = 0
-        if s["NEL_VC"]: score += (s["NEL_VC"] - 6.5) * 30
-        if s["CP"]: score += (s["CP"] - 60) * 1.0
-        if s["starch"]: score += (s["starch"] - 250) * 0.1
-        if s["NDF"]: score -= (s["NDF"] - 300) * 0.05
-        if s["dOM"]: score += (s["dOM"] - 75) * 1.5
-        if s["RNB"]: score -= abs(s["RNB"] + 8) * 2
+        score = 0.0
+        if s["NEL_VC"] is not None: score += (s["NEL_VC"] - 6.5) * 30
+        if s["CP"]     is not None: score += (s["CP"] - 60) * 1.0
+        if s["starch"] is not None: score += (s["starch"] - 250) * 0.1
+        if s["NDF"]    is not None: score -= (s["NDF"] - 300) * 0.05
+        if s["dOM"]    is not None: score += (s["dOM"] - 75) * 1.5
+        if s["RNB"]    is not None: score -= abs(s["RNB"] + 8) * 2
         s["score"] = round(score, 2)
 
     result["ratings"] = sorted(result["samples"], key=lambda s: s["score"], reverse=True)
     return result
 
+
 def feeds_to_dataframe(result: dict) -> pd.DataFrame:
     rows = []
     for i, s in enumerate(result["ratings"], 1):
-        rows.append({"Рейтинг": i, "Образец": s["name"], "Номер": s["id"], "СП, г/кг": s["CP"], "Крахмал": s["starch"], "Сахар": s["sugar"], "НДК": s["NDF"], "КДК": s["ADF"], "Перев. ОВ, %": s["dOM"], "NEL": s["NEL"], "NEL-VC": s["NEL_VC"], "nXP": s["nXP"], "RNB": s["RNB"], "Балл": s["score"]})
+        rows.append({
+            "Рейтинг": i, "Образец": s["name"], "Номер": s["id"],
+            "DM": s["DM"], "СП, г/кг": s["CP"], "Крахмал": s["starch"], "Сахар": s["sugar"],
+            "НДК": s["NDF"], "КДК": s["ADF"], "Перев. ОВ, %": s["dOM"],
+            "NEL": s["NEL"], "NEL-VC": s["NEL_VC"], "nXP": s["nXP"],
+            "RNB": s["RNB"], "Балл": s["score"],
+        })
     return pd.DataFrame(rows)
