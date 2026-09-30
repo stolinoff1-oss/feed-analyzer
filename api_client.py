@@ -10,8 +10,8 @@ SYSTEM_PROMPT = """Ты — опытный зоотехник-консульта
 Отвечай структурированно, без воды, на русском языке."""
 
 # === AIAI.BY / Vedai (OpenAI-совместимый) ===
-AIAI_API_URL = "https://api.bycom.by/v1/chat/completions"
-AIAI_MODEL = "aion-2.0"  # из документации; при желании замените на другую доступную
+AIAI_API_URL = "https://api.aiai.by/v1/chat/completions"
+AIAI_MODEL = "deepseek-chat"  # из документации; при желании замените на другую доступную
 
 
 def get_ai_recommendation(context: str) -> str:
