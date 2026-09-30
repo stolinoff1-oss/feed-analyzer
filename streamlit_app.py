@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import tempfile
@@ -8,6 +9,10 @@ from feed_analyzer import load_feed_data, analyze_feeds, feeds_to_dataframe
 from ration_calculator import calculate_ration, ration_to_dataframe
 from api_client import get_ai_recommendation, build_context
 from pdf_report import generate_pdf
+
+# === КОНТАКТ ===
+CONTACT_EMAIL = "viktar.hrechka@syngenta.com"
+
 
 st.set_page_config(page_title="Анализ кормов", page_icon="🐄", layout="wide")
 
@@ -35,14 +40,68 @@ def check_password():
 if not check_password():
     st.stop()
 
-st.title("🐄 Анализ кормов и расчёт рационов")
 
+# ================== ШАПКА: email справа ==================
+_, col_contact = st.columns([4, 1])
+with col_contact:
+    st.markdown(
+        f"<div style='text-align:right; color:#2C7A3E; font-size:13px; "
+        f"padding-top:8px;'>По всем вопросам:<br>"
+        f"<a href='mailto:{CONTACT_EMAIL}' "
+        f"style='color:#2C7A3E; text-decoration:underline;'>"
+        f"{CONTACT_EMAIL}</a></div>",
+        unsafe_allow_html=True,
+    )
+
+
+# ================== ЛОГОТИПЫ (3 шт., слева-направо) ==================
+def _show_logo(path, width=140):
+    """Показывает картинку, если файл существует в репозитории."""
+    if os.path.exists(path):
+        st.image(path, width=width)
+
+
+col_l1, col_l2, col_l3 = st.columns(3)
+
+with col_l1:
+    _show_logo("logo1.png", width=140)
+
+with col_l2:
+    st.markdown("<div style='text-align:center;'>", unsafe_allow_html=True)
+    _show_logo("logo2.png", width=140)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+with col_l3:
+    st.markdown("<div style='text-align:right;'>", unsafe_allow_html=True)
+    _show_logo("logo3.png", width=140)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ================== ЗАГОЛОВОК ==================
+st.markdown(
+    "<h1 style='text-align:center; color:#2C7A3E; margin-bottom:4px;'>"
+    "🐄 Анализ кормов и расчёт рационов</h1>",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    "<p style='text-align:center; color:#7F8C8D; font-size:13px; "
+    "margin-top:0;'>Лабораторный анализ силоса • рекомендации по рациону "
+    "• оценка качества</p>",
+    unsafe_allow_html=True,
+)
+st.markdown("---")
+
+
+# ================== БОКОВАЯ ПАНЕЛЬ ==================
 with st.sidebar:
     st.header("Параметры коровы")
     live_weight = st.number_input("Живая масса, кг", value=650, step=10)
     milk_yield = st.number_input("Удой, кг/сут", value=35.0, step=0.5)
 
-uploaded = st.file_uploader("Excel-файл с анализами (.xlsx)", type=["xlsx", "xls"])
+
+# ================== ЗАГРУЗКА ФАЙЛА ==================
+uploaded = st.file_uploader("Excel-файл с анализами (.xlsx)",
+                             type=["xlsx", "xls"])
 if uploaded is None:
     st.info("👆 Загрузите файл с анализами кормов")
     st.stop()
@@ -174,7 +233,7 @@ if not radar_df.empty and len(radar_df.columns) >= 3:
 st.header("📋 Рейтинг образцов (таблица)")
 st.dataframe(df_analysis, use_container_width=True)
 
-# --- Лидеры (без СП) ---
+# --- Лидеры ---
 st.header("🏆 Лидеры по категориям")
 leaders = analysis["leaders"]
 cols = st.columns(3)
@@ -282,3 +341,14 @@ with col_dl:
             mime="application/pdf",
             use_container_width=True,
         )
+
+
+# ================== ПОДВАЛ ==================
+st.markdown("---")
+st.markdown(
+    f"<div style='text-align:center; color:#7F8C8D; font-size:12px; "
+    f"padding:10px 0;'>По всем вопросам обращаться: "
+    f"<a href='mailto:{CONTACT_EMAIL}' style='color:#2C7A3E;'>"
+    f"{CONTACT_EMAIL}</a></div>",
+    unsafe_allow_html=True,
+)
