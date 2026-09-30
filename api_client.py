@@ -14,7 +14,7 @@ AIAI_MODEL = "deepseek-chat"
 
 # ⚠️ ВНИМАНИЕ: ключ вписан прямо в код. Не публикуйте этот файл.
 # Как только всё заработает — перенесите ключ обратно в Secrets и удалите отсюда.
-AIAI_API_KEY = "sk-vedai-Zqym3Wk0VsES1RsAPsrNYLpuSR7H1ovPErAV8gTyiBU"
+AIAI_API_KEY = "sk-vedai-G53MsnSCnt_DyhamqM1VlTL4oJyRXRvM3GU5ImsnpaQ"
 
 
 def get_ai_recommendation(context: str) -> str:
