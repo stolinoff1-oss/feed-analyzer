@@ -15,7 +15,8 @@ from pdf_report import generate_pdf
 CONTACT_EMAIL = "viktar.hrechka@syngenta.com"
 
 # === РАЗМЕР ЛОГОТИПОВ (высота в пикселях) ===
-LOGO_HEIGHT = 60
+LOGO_HEIGHT = 75          # высота крайних логотипов
+LOGO_HEIGHT_CENTER = 110  # высота среднего (кукуруза)
 
 
 st.set_page_config(page_title="Анализ кормов", page_icon="🐄", layout="wide")
@@ -61,9 +62,9 @@ def _logo_html(path, height=LOGO_HEIGHT):
             f'style="height:{height}px; max-width:100%; object-fit:contain;">')
 
 
-l1 = _logo_html("logo1.png")
-l2 = _logo_html("logo2.png")
-l3 = _logo_html("logo3.png")
+l1 = _logo_html("logo1.png", height=LOGO_HEIGHT)
+l2 = _logo_html("logo2.png", height=LOGO_HEIGHT_CENTER)
+l3 = _logo_html("logo3.png", height=LOGO_HEIGHT)
 
 st.markdown(
     f"""
