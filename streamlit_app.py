@@ -3,9 +3,10 @@ import pandas as pd
 import tempfile
 from feed_analyzer import load_feed_data, analyze_feeds, feeds_to_dataframe
 from ration_calculator import calculate_ration, ration_to_dataframe
-from api_client import get_ai_recommendation
+from api_client import get_ai_recommendation, build_context
 
 st.set_page_config(page_title="Анализ кормов", page_icon="🐄", layout="wide")
+
 
 def check_password():
     def password_entered():
@@ -14,25 +15,31 @@ def check_password():
             del st.session_state["password"]
         else:
             st.session_state["authenticated"] = False
+
     if "authenticated" not in st.session_state:
-        st.text_input("Пароль", type="password", on_change=password_entered, key="password")
+        st.text_input("Пароль", type="password",
+                      on_change=password_entered, key="password")
         return False
     elif not st.session_state["authenticated"]:
-        st.text_input("Пароль", type="password", on_change=password_entered, key="password")
+        st.text_input("Пароль", type="password",
+                      on_change=password_entered, key="password")
         st.error("Неверный пароль")
         return False
     return True
+
 
 if not check_password():
     st.stop()
 
 st.title("🐄 Анализ кормов и расчёт рационов")
 
+# --- Боковая панель ---
 with st.sidebar:
     st.header("Параметры коровы")
     live_weight = st.number_input("Живая масса, кг", value=650, step=10)
     milk_yield = st.number_input("Удой, кг/сут", value=35.0, step=0.5)
 
+# --- Загрузка файла ---
 uploaded = st.file_uploader("Excel-файл с анализами (.xlsx)", type=["xlsx", "xls"])
 if uploaded is None:
     st.info("👆 Загрузите файл с анализами кормов")
@@ -51,9 +58,27 @@ except Exception as e:
     st.stop()
 
 st.success(f"Загружено {len(df)} образцов")
+
+# --- Рейтинг ---
 st.header("📊 Рейтинг образцов")
 st.dataframe(df_analysis, use_container_width=True)
 
+# --- Лидеры ---
+st.header("🏆 Лидеры по категориям")
+leaders = analysis["leaders"]
+cols = st.columns(4)
+metrics = [
+    ("max_CP", "Макс. протеин", "CP"),
+    ("max_starch", "Макс. крахмал", "starch"),
+    ("max_NEL_VC", "Макс. NEL-VC", "NEL_VC"),
+    ("best_RNB", "Лучший RNB", "RNB"),
+]
+for col, (key, label, field) in zip(cols, metrics):
+    s = leaders.get(key)
+    if s:
+        col.metric(label, s["name"], f"{s.get(field)}")
+
+# --- Рационы ---
 st.header("🍽️ Расчёт рационов (топ-2 образца)")
 rations = {}
 for s in analysis["ratings"][:2]:
@@ -63,12 +88,46 @@ for s in analysis["ratings"][:2]:
 for name, r in rations.items():
     with st.expander(f"Рацион: {name}", expanded=True):
         col1, col2, col3 = st.columns(3)
-        col1.metric("NEL, МДж", f"{r['total']['NEL']:.1f}", f"{r['total']['NEL'] - r['norms']['NEL']:+.1f}")
-        col2.metric("nXP, г", f"{r['total']['nXP']:.0f}", f"{r['total']['nXP'] - r['norms']['nXP']:+.0f}")
-        col3.metric("СВ, кг", f"{r['total']['dm']:.1f}", f"{r['total']['dm'] - r['norms']['DM']:+.1f}")
+        col1.metric("NEL, МДж", f"{r['total']['NEL']:.1f}",
+                    f"{r['total']['NEL'] - r['norms']['NEL']:+.1f}")
+        col2.metric("nXP, г", f"{r['total']['nXP']:.0f}",
+                    f"{r['total']['nXP'] - r['norms']['nXP']:+.0f}")
+        col3.metric("СВ, кг", f"{r['total']['dm']:.1f}",
+                    f"{r['total']['dm'] - r['norms']['DM']:+.1f}")
         st.dataframe(ration_to_dataframe(r), use_container_width=True)
+        if r["corrections"]:
+            st.warning("Корректировки: " + "; ".join(str(c) for c in r["corrections"]))
 
-st.header("🩺 Рекомендации")
-context = "\n".join([f"{s['name']}: СП={s['CP']}, крахмал={s['starch']}, НДК={s['NDF']}, NEL-VC={s['NEL_VC']}, RNB={s['RNB']}" for s in analysis["ratings"]])
-ai_text = get_ai_recommendation(context)
+# --- AI-рекомендации ---
+st.header("🩺 Рекомендации зоотехника (ИИ)")
+
+# Кнопка принудительного обновления
+col_a, col_b = st.columns([1, 4])
+with col_a:
+    refresh = st.button("🔄 Обновить", help="Сгенерировать рекомендации заново")
+
+context = build_context(analysis, rations, live_weight, milk_yield)
+
+with st.spinner("DeepSeek анализирует данные..."):
+    ai_text = get_ai_recommendation(context, force_refresh=refresh)
+
 st.markdown(ai_text)
+
+# --- Скачивание отчёта ---
+st.divider()
+st.header("📥 Скачать отчёт")
+
+out_path = tempfile.mktemp(suffix=".xlsx")
+with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+    df_analysis.to_excel(writer, sheet_name="Анализ", index=False)
+    for name, r in rations.items():
+        safe = str(name)[:25].replace("/", "_")
+        ration_to_dataframe(r).to_excel(writer, sheet_name=f"Рацион_{safe}", index=False)
+
+with open(out_path, "rb") as f:
+    st.download_button(
+        "📥 Скачать Excel-отчёт",
+        data=f,
+        file_name="feed_report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
