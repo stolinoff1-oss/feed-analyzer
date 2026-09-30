@@ -20,7 +20,6 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 
-# --- Шрифты с кириллицей из matplotlib ---
 _MPL_FONTS = os.path.join(matplotlib.get_data_path(), "fonts", "ttf")
 _REGULAR = os.path.join(_MPL_FONTS, "DejaVuSans.ttf")
 _BOLD = os.path.join(_MPL_FONTS, "DejaVuSans-Bold.ttf")
@@ -33,6 +32,41 @@ PRIMARY = colors.HexColor("#2C7A3E")
 ACCENT = colors.HexColor("#F39C12")
 GREY = colors.HexColor("#7F8C8D")
 LIGHT = colors.HexColor("#ECF0F1")
+
+
+# =============== ОЧИСТКА ТЕКСТА ===============
+
+_MOJIBAKE_RE = re.compile(r"[ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ]")
+
+
+def _fix_mojibake(s: str) -> str:
+    """Исправляет 'Ãèáðèä' → 'Гибрид' (Windows-1251 прочитанный как Latin-1)."""
+    if not isinstance(s, str):
+        return s
+    if not _MOJIBAKE_RE.search(s):
+        return s
+    for enc_from in ("latin-1", "cp1252"):
+        for enc_to in ("cp1251", "utf-8"):
+            try:
+                fixed = s.encode(enc_from).decode(enc_to)
+                if not _MOJIBAKE_RE.search(fixed):
+                    return fixed
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue
+    return s
+
+
+def _clean_text(s: str) -> str:
+    """Убирает непечатные символы и мусор."""
+    if not isinstance(s, str):
+        s = str(s)
+    # Zero-width и bidi-маркеры
+    s = re.sub(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]", "", s)
+    # Управляющие символы, кроме \n и \t
+    s = "".join(ch for ch in s if ch.isprintable() or ch in "\n\t")
+    # Регионы Latin-1 Supplement (мусор от кракозябр)
+    s = re.sub(r"[\u00a1-\u00bf\u00c0-\u00ff]+", "", s)
+    return s
 
 
 # =============== ГРАФИКИ ===============
@@ -95,7 +129,9 @@ def _radar_chart(df: pd.DataFrame, top_n: int = 4):
     data = []
     for _, col, higher in params:
         vals = pd.to_numeric(df[col], errors="coerce").fillna(0)
-        if higher:
+        if vals.max() == vals.min():
+            score = pd.Series([50] * len(vals))
+        elif higher:
             score = (vals - vals.min()) / (vals.max() - vals.min() + 1e-9) * 100
         else:
             score = (vals.max() - vals) / (vals.max() - vals.min() + 1e-9) * 100
@@ -127,6 +163,8 @@ def _radar_chart(df: pd.DataFrame, top_n: int = 4):
 # =============== MARKDOWN → REPORTLAB ===============
 
 def _inline_md(s: str) -> str:
+    s = _fix_mojibake(s)
+    s = _clean_text(s)
     s = s.replace("&", "&amp;")
     s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
     s = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r"<i>\1</i>", s)
@@ -135,10 +173,20 @@ def _inline_md(s: str) -> str:
 
 def _md_to_story(text: str, styles):
     story = []
+    text = _fix_mojibake(text)
     for line in text.split("\n"):
         line = line.rstrip()
         if not line:
             story.append(Spacer(1, 3))
+            continue
+        # Пропускаем строки-таблицы markdown — выведем их отдельно
+        if line.startswith("|") and line.endswith("|"):
+            if re.match(r"^\|[\s\-:|]+\|$", line):
+                continue
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            story.append(Paragraph(
+                " &nbsp;|&nbsp; ".join(_inline_md(c) for c in cells),
+                styles["pdf_table_row"]))
             continue
         if line.startswith("### "):
             story.append(Paragraph(_inline_md(line[4:]), styles["pdf_h3"]))
@@ -163,23 +211,29 @@ def _md_to_story(text: str, styles):
             story.append(Paragraph(f"{m.group(1)}. {_inline_md(m.group(2))}",
                                     styles["pdf_bullet"]))
             continue
-        if line.startswith("|") and line.endswith("|"):
-            if re.match(r"^\|[\s\-:|]+\|$", line):
-                continue
-            cells = [c.strip() for c in line.strip("|").split("|")]
-            story.append(Paragraph(
-                " &nbsp;|&nbsp; ".join(_inline_md(c) for c in cells),
-                styles["pdf_table_row"]))
-            continue
         story.append(Paragraph(_inline_md(line), styles["pdf_body"]))
     return story
+
+
+# =============== КОРРЕКТИРОВКИ ===============
+
+def _fmt_correction(c) -> str:
+    if not isinstance(c, dict):
+        return str(c)
+    feed = c.get("корм", "—")
+    if "кг" in c:
+        nel = f" (+{c['NEL']} МДж NEL)" if "NEL" in c else ""
+        return f"{feed}: {c['кг']} кг/сутки{nel}"
+    if "кг СВ" in c:
+        nxp = f" (+{c['nXP']} г nXP)" if "nXP" in c else ""
+        return f"{feed}: {c['кг СВ']} кг СВ/сутки{nxp}"
+    return str(c)
 
 
 # =============== СБОРКА PDF ===============
 
 def _make_styles():
     styles = getSampleStyleSheet()
-    # Уникальные имена, чтобы не конфликтовать со встроенными алиасами reportlab
     styles.add(ParagraphStyle("pdf_title", parent=styles["Title"],
                               fontName="DejaVu-Bold", fontSize=20,
                               textColor=PRIMARY, spaceAfter=8))
@@ -208,6 +262,24 @@ def _make_styles():
     styles.add(ParagraphStyle("pdf_table_row", parent=styles["BodyText"],
                               fontName="DejaVu", fontSize=9, leading=12))
     return styles
+
+
+def _make_table(data, col_widths, header_color=PRIMARY):
+    t = Table(data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), header_color),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "DejaVu-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "DejaVu"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.3, GREY),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    return t
 
 
 def generate_pdf(analysis: dict, rations: dict, ai_text: str,
@@ -251,22 +323,9 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
             f"{s['NDF']:.0f}" if s["NDF"] is not None else "—",
             f"{s['RNB']:.1f}" if s["RNB"] is not None else "—",
         ])
-    t = Table(summary_data, colWidths=[10*mm, 42*mm, 15*mm, 18*mm,
-                                        14*mm, 20*mm, 14*mm, 17*mm])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "DejaVu-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "DejaVu"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("GRID", (0, 0), (-1, -1), 0.3, GREY),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    story.append(t)
+    story.append(_make_table(summary_data,
+                              [10*mm, 42*mm, 15*mm, 18*mm,
+                               14*mm, 20*mm, 14*mm, 17*mm]))
     story.append(PageBreak())
 
     # ---- 2. Графики ----
@@ -342,20 +401,9 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
             ["НДК, г", "—", f"{tot['NDF']:.0f}",
              f"{100 * tot['NDF'] / (tot['dm'] * 1000):.1f}% СВ"],
         ]
-        t1 = Table(metrics, colWidths=[42*mm, 28*mm, 28*mm, 42*mm])
-        t1.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), ACCENT),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "DejaVu-Bold"),
-            ("FONTNAME", (0, 1), (-1, -1), "DejaVu"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("GRID", (0, 0), (-1, -1), 0.3, GREY),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ]))
-        story.append(t1)
+        story.append(_make_table(metrics,
+                                  [42*mm, 28*mm, 28*mm, 42*mm],
+                                  header_color=ACCENT))
         story.append(Spacer(1, 5))
 
         comp = [["Корм", "СВ, кг", "Нат. вес, кг",
@@ -364,27 +412,16 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
             comp.append([feed, f"{vals['dm']:.2f}", f"{vals['nat']:.2f}",
                          f"{vals['NEL']:.1f}", f"{vals['nXP']:.0f}",
                          f"{vals['NDF']:.0f}"])
-        t2 = Table(comp, colWidths=[52*mm, 20*mm, 28*mm,
-                                      24*mm, 20*mm, 22*mm])
-        t2.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "DejaVu-Bold"),
-            ("FONTNAME", (0, 1), (-1, -1), "DejaVu"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("ALIGN", (1, 0), (-1, -1), "CENTER"),
-            ("GRID", (0, 0), (-1, -1), 0.3, GREY),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT]),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ]))
-        story.append(t2)
+        story.append(_make_table(comp,
+                                  [52*mm, 20*mm, 28*mm,
+                                   24*mm, 20*mm, 22*mm]))
 
         if r["corrections"]:
             story.append(Spacer(1, 4))
             story.append(Paragraph("<b>Корректировки:</b>", styles["pdf_body"]))
             for c in r["corrections"]:
-                story.append(Paragraph(f"• {c}", styles["pdf_bullet"]))
+                story.append(Paragraph(f"• {_fmt_correction(c)}",
+                                        styles["pdf_bullet"]))
 
         story.append(Spacer(1, 12))
 
