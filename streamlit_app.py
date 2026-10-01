@@ -115,7 +115,6 @@ mode = st.radio(
 
 df = None
 
-# ---------- Режим 1: Excel ----------
 if mode == "📁 Загрузить Excel-файл":
     uploaded = st.file_uploader("Excel-файл с анализами (.xlsx)",
                                  type=["xlsx", "xls"])
@@ -133,13 +132,9 @@ if mode == "📁 Загрузить Excel-файл":
         st.error(f"Ошибка чтения файла: {e}")
         st.stop()
 
-
-# ---------- Режим 2: Ручной ввод ----------
 else:
-    n_silos = st.number_input(
-        "Сколько силосов добавить?",
-        min_value=1, max_value=30, value=3, step=1,
-    )
+    n_silos = st.number_input("Сколько силосов добавить?",
+                                min_value=1, max_value=30, value=3, step=1)
     st.caption("Заполните данные для каждого силоса.")
 
     silos_data = []
@@ -308,7 +303,6 @@ if not radar_df.empty and len(radar_df.columns) >= 3:
         margin=dict(l=40, r=40, t=40, b=40),
     )
     st.plotly_chart(fig_radar, use_container_width=True)
-    st.caption("Показаны 3 лучших образца и 1 худший для сравнения.")
 
 
 # ================== ТАБЛИЦА ==================
@@ -332,50 +326,80 @@ for col, (key, label, field) in zip(cols, metrics):
         col.metric(label, "—", "")
 
 
-# ================== РАЦИОНЫ (все образцы) ==================
+# ================== РАЦИОНЫ ==================
 st.header("🍽️ Расчёт рационов для всех образцов")
+st.caption("Доля силоса адаптируется под НДК каждого образца: "
+           "чем выше НДК, тем меньше силоса и больше концентратов.")
 
 rations = {}
 for s in analysis["ratings"]:
     r = calculate_ration(s, live_weight, milk_yield)
     rations[s["name"]] = r
 
+# Сводная таблица со структурой рациона
 summary_rows = []
 for name, r in rations.items():
+    comp = r["composition"]
     summary_rows.append({
         "Образец": name,
+        "Силос, % СВ": round(comp["silo_pct"], 1),
+        "Сено, % СВ": round(comp["hay_pct"], 1),
+        "Сенаж, % СВ": round(comp["haylage_pct"], 1),
+        "Комбикорм, % СВ": round(comp["conc_pct"], 1),
+        "Жир, кг": round(comp["fat_kg"], 2),
+        "Шрот, кг СВ": round(comp["soy_dm"], 2),
+        "НДК, % СВ": round(comp["ndf_pct"], 1),
         "NEL, МДж": round(r["total"]["NEL"], 1),
-        "Норма NEL": r["norms"]["NEL"],
         "Δ NEL": round(r["total"]["NEL"] - r["norms"]["NEL"], 1),
         "nXP, г": round(r["total"]["nXP"], 0),
-        "Норма nXP": r["norms"]["nXP"],
         "Δ nXP": round(r["total"]["nXP"] - r["norms"]["nXP"], 0),
-        "СВ, кг": round(r["total"]["dm"], 2),
-        "Корректировок": len(r["corrections"]),
+        "Предупреждений": len(r["warnings"]),
     })
 summary_df = pd.DataFrame(summary_rows)
 
-st.subheader("Сводная таблица по всем образцам")
+st.subheader("Структура рационов по всем образцам")
 st.dataframe(summary_df, use_container_width=True)
+
+# График структуры рационов
+st.subheader("Структура рационов (визуализация)")
+fig_struct = go.Figure()
+fig_struct.add_trace(go.Bar(name="Силос", x=summary_df["Образец"],
+                             y=summary_df["Силос, % СВ"], marker_color="#F39C12"))
+fig_struct.add_trace(go.Bar(name="Сено", x=summary_df["Образец"],
+                             y=summary_df["Сено, % СВ"], marker_color="#8B4513"))
+fig_struct.add_trace(go.Bar(name="Сенаж", x=summary_df["Образец"],
+                             y=summary_df["Сенаж, % СВ"], marker_color="#27AE60"))
+fig_struct.add_trace(go.Bar(name="Комбикорм", x=summary_df["Образец"],
+                             y=summary_df["Комбикорм, % СВ"], marker_color="#3498DB"))
+fig_struct.update_layout(barmode="stack", height=400,
+                          xaxis_tickangle=-45,
+                          yaxis_title="% от СВ",
+                          margin=dict(l=10, r=10, t=10, b=10),
+                          legend=dict(orientation="h", yanchor="bottom",
+                                      y=1.02, xanchor="right", x=1))
+st.plotly_chart(fig_struct, use_container_width=True)
 
 st.subheader("Детализация по образцам")
 for i, (name, r) in enumerate(rations.items()):
-    with st.expander(f"{i+1}. {name}", expanded=False):
-        c1, c2, c3 = st.columns(3)
+    warn_emoji = "⚠️" if r["warnings"] else "✅"
+    with st.expander(f"{i+1}. {name} {warn_emoji}", expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("NEL, МДж", f"{r['total']['NEL']:.1f}",
                   f"{r['total']['NEL'] - r['norms']['NEL']:+.1f}")
         c2.metric("nXP, г", f"{r['total']['nXP']:.0f}",
                   f"{r['total']['nXP'] - r['norms']['nXP']:+.0f}")
         c3.metric("СВ, кг", f"{r['total']['dm']:.2f}",
                   f"{r['total']['dm'] - r['norms']['DM']:+.2f}")
+        c4.metric("НДК, % СВ", f"{r['composition']['ndf_pct']:.1f}",
+                  f"{r['composition']['ndf_pct'] - 34:+.1f}")
 
         st.dataframe(ration_to_dataframe(r), use_container_width=True)
 
-        if r["corrections"]:
-            st.warning("Корректировки: " +
-                       "; ".join(str(c) for c in r["corrections"]))
+        if r["warnings"]:
+            for w in r["warnings"]:
+                st.warning(w)
         else:
-            st.success("Корректировки не требуются.")
+            st.success("Рацион сбалансирован.")
 
 
 # ================== ✏️ РЕДАКТИРОВАНИЕ РАЦИОНА ==================
@@ -385,12 +409,8 @@ st.caption("Выберите образец и меняйте состав — �
 
 silo_inputs = {s["name"]: s for s in analysis["ratings"]}
 
-sel_name = st.selectbox(
-    "Образец для редактирования:",
-    list(rations.keys()),
-    key="edit_select",
-)
-
+sel_name = st.selectbox("Образец для редактирования:",
+                          list(rations.keys()), key="edit_select")
 base_r = rations[sel_name]
 comp = base_r["composition"]
 prefix = f"edit_{sel_name}_"
@@ -405,7 +425,7 @@ with col_reset:
 
 c1, c2 = st.columns(2)
 with c1:
-    silo_dm = st.slider("Силос, кг СВ", 0.0, 30.0,
+    silo_dm = st.slider("Силос, кг СВ", 0.0, 20.0,
                         float(comp["silo_dm"]), 0.1, key=prefix + "silo")
     hay_dm = st.slider("Сено, кг СВ", 0.0, 10.0,
                        float(comp["hay_dm"]), 0.1, key=prefix + "hay")
@@ -440,21 +460,18 @@ e2.metric("nXP, г", f"{edited['total']['nXP']:.0f}",
           f"{edited['total']['nXP'] - edited['norms']['nXP']:+.0f}")
 e3.metric("СВ, кг", f"{edited['total']['dm']:.2f}",
           f"{edited['total']['dm'] - edited['norms']['DM']:+.2f}")
-ndf_pct = (100 * edited["total"]["NDF"] / (edited["total"]["dm"] * 1000)
-           if edited["total"]["dm"] else 0)
-e4.metric("НДК, % от СВ", f"{ndf_pct:.1f}",
-          f"{ndf_pct - 32:+.1f} к норме 32%")
+e4.metric("НДК, % СВ", f"{edited['composition']['ndf_pct']:.1f}",
+          f"{edited['composition']['ndf_pct'] - 34:+.1f}")
 
 st.dataframe(ration_to_dataframe(edited), use_container_width=True)
 
-# Сохранение отредактированной версии — чтобы попадала в PDF
-if st.button("💾 Использовать этот рацион в PDF", key="edit_apply_pdf"):
-    st.session_state["edited_ration"] = (sel_name, edited)
-    st.success(f"Рацион для «{sel_name}» сохранён — он попадёт в PDF-отчёт.")
+if edited["warnings"]:
+    for w in edited["warnings"]:
+        st.warning(w)
 
 
 # ================== AI ==================
-st.header("🩺 Рекомендации")
+st.header("🩺 Рекомендации зоотехника (ИИ)")
 col_a, col_b = st.columns([1, 4])
 with col_a:
     refresh = st.button("🔄 Обновить")
