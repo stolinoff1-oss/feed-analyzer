@@ -520,7 +520,7 @@ def render_economics_page():
 
     # ================== AI-ВЫВОД ==================
     st.markdown("---")
-    st.subheader("7. 🩺 Экономический вывод (ИИ)")
+    st.subheader("7. 🩺 Экономический вывод")
 
     col_a, col_b = st.columns([1, 4])
     with col_a:
@@ -547,7 +547,7 @@ def render_economics_page():
         competitor_extra=competitor_extra,
     ) + feed_context_extra
 
-    with st.spinner("AI анализирует экономику..."):
+    with st.spinner("Анализирует экономику..."):
         econ_ai_text = get_economics_ai_recommendation(
             econ_context, force_refresh=refresh_econ
         )
