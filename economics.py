@@ -88,12 +88,7 @@ def calc_feed_economics(silenta_params: dict,
                          hay_price_per_t: float = 0.0,
                          haylage_price_per_t: float = 0.0,
                          feeds_lib: dict = None) -> dict:
-    """
-    Считает экономию на кормах за счёт качества силоса.
-
-    silenta_params / competitor_params — словари с полями:
-        DM (г/кг), starch, NDF, NEL_VC, nXP, RNB, dOM, sugar
-    """
+    """Считает экономию на кормах за счёт качества силоса."""
     from ration_calculator import calculate_ration
 
     r1 = calculate_ration(silenta_params, live_weight, milk_yield,
@@ -104,7 +99,6 @@ def calc_feed_economics(silenta_params: dict,
     def _nat(ration_dict, feed):
         return ration_dict["ration"].get(feed, {}).get("nat", 0.0)
 
-    # кг нат. веса на 1 корову в день
     silo1_nat = _nat(r1, "силос")
     silo2_nat = _nat(r2, "силос")
     conc1_nat = _nat(r1, "комбикорм")
@@ -114,26 +108,21 @@ def calc_feed_economics(silenta_params: dict,
     haylage1_nat = _nat(r1, "сенаж")
     haylage2_nat = _nat(r2, "сенаж")
 
-    # Разница (competitor − silenta). Если Сингента эффективнее — разница
-    # положительная, значит competitor тратит больше, а Сингента экономит.
     delta_silo_nat    = silo2_nat - silo1_nat
     delta_conc_nat    = conc2_nat - conc1_nat
     delta_hay_nat     = hay2_nat - hay1_nat
     delta_haylage_nat = haylage2_nat - haylage1_nat
 
-    # Перевод цены в валюту за кг
     conc_price_kg    = conc_price_per_t / 1000
     silo_price_kg    = silo_price_per_t / 1000
     hay_price_kg     = hay_price_per_t / 1000
     haylage_price_kg = haylage_price_per_t / 1000
 
-    # Экономия на 1 корову в день (в валюте)
     saving_silo_cow_day    = delta_silo_nat * silo_price_kg
     saving_conc_cow_day    = delta_conc_nat * conc_price_kg
     saving_hay_cow_day     = delta_hay_nat * hay_price_kg
     saving_haylage_cow_day = delta_haylage_nat * haylage_price_kg
 
-    # На всё поголовье
     saving_silo_day    = saving_silo_cow_day * n_cows
     saving_conc_day    = saving_conc_cow_day * n_cows
     saving_hay_day     = saving_hay_cow_day * n_cows
@@ -144,25 +133,20 @@ def calc_feed_economics(silenta_params: dict,
     total_feed_year = total_feed_day * 365
 
     return {
-        # Рационы
         "ration_silenta": r1,
         "ration_competitor": r2,
-        # Расход на 1 корову в день (кг нат.)
         "silo1_nat": silo1_nat, "silo2_nat": silo2_nat,
         "conc1_nat": conc1_nat, "conc2_nat": conc2_nat,
         "hay1_nat": hay1_nat, "hay2_nat": hay2_nat,
         "haylage1_nat": haylage1_nat, "haylage2_nat": haylage2_nat,
-        # Разница на 1 корову в день
         "delta_silo_nat": delta_silo_nat,
         "delta_conc_nat": delta_conc_nat,
         "delta_hay_nat": delta_hay_nat,
         "delta_haylage_nat": delta_haylage_nat,
-        # Экономия на 1 корову в день
         "saving_silo_cow_day": saving_silo_cow_day,
         "saving_conc_cow_day": saving_conc_cow_day,
         "saving_hay_cow_day": saving_hay_cow_day,
         "saving_haylage_cow_day": saving_haylage_cow_day,
-        # Экономия на всё поголовье
         "saving_silo_day": saving_silo_day,
         "saving_silo_year": saving_silo_day * 365,
         "saving_conc_day": saving_conc_day,
@@ -174,4 +158,40 @@ def calc_feed_economics(silenta_params: dict,
         "total_feed_day": total_feed_day,
         "total_feed_year": total_feed_year,
         "n_cows": n_cows,
+    }
+
+
+# ================== ИЗЛИШЕК СИЛОСА ==================
+
+def calc_silo_surplus(silenta_result: dict,
+                       competitor_result: dict,
+                       silo_price_per_t: float,
+                       grain_price: float) -> dict:
+    """Считает излишек силоса при одинаковой площади."""
+    same_area = competitor_result["area"]
+
+    dm_silenta_c = silenta_result["dm_yield"] * same_area
+    dm_competitor_c = competitor_result["dm_yield"] * same_area
+
+    surplus_dm_c = dm_silenta_c - dm_competitor_c
+    surplus_dm_t = surplus_dm_c / 10.0
+
+    dm_pct = silenta_result["dm_pct"] / 100.0
+    surplus_gm_t = surplus_dm_t / dm_pct if dm_pct > 0 else 0
+
+    saving_sale = surplus_gm_t * silo_price_per_t
+
+    me = silenta_result["me"]
+    surplus_me_mj = surplus_dm_t * 1000.0 * me
+    grain_kg = surplus_me_mj / GRAIN_ME
+    saving_grain_equiv = grain_kg / 1000.0 * grain_price
+
+    return {
+        "same_area": same_area,
+        "surplus_dm_t": surplus_dm_t,
+        "surplus_gm_t": surplus_gm_t,
+        "surplus_me_mj": surplus_me_mj,
+        "surplus_grain_t": grain_kg / 1000.0,
+        "saving_sale": saving_sale,
+        "saving_grain_equiv": saving_grain_equiv,
     }
