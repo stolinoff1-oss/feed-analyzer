@@ -1,7 +1,4 @@
-"""UI для страницы «Экономика выращивания» + AI-выводы.
-Все суммы — в валюте расчёта (BYN, RUB, KZT и т.д. — на выбор пользователя).
-Потребность в силосе вводится в тоннах.
-"""
+"""UI для страницы «Экономика выращивания» + AI-выводы + PDF."""
 
 import streamlit as st
 import pandas as pd
@@ -10,6 +7,7 @@ import plotly.graph_objects as go
 from economics import calculate_economics
 from api_client import (get_economics_ai_recommendation,
                          build_economics_context)
+from pdf_report import generate_economics_pdf
 
 
 def _fmt(x, digits=0):
@@ -25,15 +23,11 @@ def _fmt(x, digits=0):
 
 
 def _get_sample_params(sample: dict) -> dict:
-    """Извлекает из образца анализа параметры для экономики."""
-    dm_kg = sample.get("DM")  # г/кг → % = /10
+    dm_kg = sample.get("DM")
     dm_pct = dm_kg / 10 if dm_kg else 35.0
-
-    # ОЭ (ME) — если нет, fallback на NEL-VC
     me = sample.get("ME")
     if not me:
         me = sample.get("NEL-VC") or sample.get("NEL_VC") or 11.0
-
     return {
         "dm_pct": dm_pct,
         "me": me,
@@ -79,20 +73,14 @@ def render_economics_page():
     with c1:
         silo_demand_t = st.number_input(
             "Потребность в силосе, т/год",
-            value=17_000.0,
-            step=100.0,
-            format="%.1f",
-            help="Вводится в тоннах. Если у вас в центнерах — "
-                 "разделите на 10. Внутри программы 1 т = 10 ц.",
+            value=17_000.0, step=100.0, format="%.1f",
+            help="В тоннах. Внутри программы 1 т = 10 ц.",
         )
     with c2:
         grain_price = st.number_input(
             "Цена кукурузного зерна, за 1 т (в валюте расчёта)",
-            value=10_000.0,
-            step=500.0,
-            format="%.0f",
-            help="Можно вводить в рублях РФ, BYN, тенге и т.д. — "
-                 "всё в одной валюте, без пересчёта.",
+            value=10_000.0, step=500.0, format="%.0f",
+            help="BYN, RUB, KZT — в одной валюте, без пересчёта.",
         )
 
     silo_demand_c = silo_demand_t * 10
@@ -121,28 +109,21 @@ def render_economics_page():
                         silenta_extra = _get_sample_params(r)
                         break
 
-        s_yield = st.number_input(
-            "Урожайность ЗМ, ц/га",
-            value=430.0, step=5.0, format="%.1f",
-            key="econ_s_yield",
-        )
-        s_seed_rate = st.number_input(
-            "Норма высева, шт/га",
-            value=75_000.0, step=1_000.0, format="%.0f",
-            key="econ_s_rate",
-        )
+        s_yield = st.number_input("Урожайность ЗМ, ц/га",
+                                    value=430.0, step=5.0, format="%.1f",
+                                    key="econ_s_yield")
+        s_seed_rate = st.number_input("Норма высева, шт/га",
+                                        value=75_000.0, step=1_000.0,
+                                        format="%.0f", key="econ_s_rate")
         s_seed_price = st.number_input(
             "Стоимость 1 п.е. (80 тыс.семян), в валюте расчёта",
             value=16_830.0, step=100.0, format="%.0f",
-            key="econ_s_price",
-        )
+            key="econ_s_price")
         s_field_cost = st.number_input(
             "Затраты на 1 га, в валюте расчёта",
             value=20_000.0, step=500.0, format="%.0f",
-            key="econ_s_field",
-        )
+            key="econ_s_field")
 
-        # СВ% и ОЭ — из анализа или вручную
         if silenta_extra:
             s_dm = silenta_extra["dm_pct"]
             s_me = silenta_extra["me"]
@@ -150,20 +131,14 @@ def render_economics_page():
             m1, m2 = st.columns(2)
             m1.metric("Содержание СВ, %", f"{s_dm:.1f}")
             m2.metric("ОЭ, МДж/кг СВ", f"{s_me:.2f}")
-            st.caption("🔒 Значения подтянуты из анализа. "
-                       "Чтобы ввести вручную — снимите галочку "
-                       "«Использовать данные из анализа» выше.")
+            st.caption("🔒 Значения подтянуты из анализа.")
         else:
-            s_dm = st.number_input(
-                "Содержание СВ, %",
-                value=34.0, step=0.5, format="%.1f",
-                key="econ_s_dm",
-            )
-            s_me = st.number_input(
-                "ОЭ, МДж/кг СВ",
-                value=10.8, step=0.1, format="%.2f",
-                key="econ_s_me",
-            )
+            s_dm = st.number_input("Содержание СВ, %",
+                                     value=34.0, step=0.5, format="%.1f",
+                                     key="econ_s_dm")
+            s_me = st.number_input("ОЭ, МДж/кг СВ",
+                                     value=10.8, step=0.1, format="%.2f",
+                                     key="econ_s_me")
 
         if silenta_extra:
             st.caption(
@@ -191,26 +166,20 @@ def render_economics_page():
                         competitor_extra = _get_sample_params(r)
                         break
 
-        c_yield = st.number_input(
-            "Урожайность ЗМ, ц/га",
-            value=400.0, step=5.0, format="%.1f",
-            key="econ_c_yield",
-        )
-        c_seed_rate = st.number_input(
-            "Норма высева, шт/га",
-            value=85_000.0, step=1_000.0, format="%.0f",
-            key="econ_c_rate",
-        )
+        c_yield = st.number_input("Урожайность ЗМ, ц/га",
+                                    value=400.0, step=5.0, format="%.1f",
+                                    key="econ_c_yield")
+        c_seed_rate = st.number_input("Норма высева, шт/га",
+                                        value=85_000.0, step=1_000.0,
+                                        format="%.0f", key="econ_c_rate")
         c_seed_price = st.number_input(
             "Стоимость 1 п.е. (80 тыс.семян), в валюте расчёта",
             value=5_634.0, step=100.0, format="%.0f",
-            key="econ_c_price",
-        )
+            key="econ_c_price")
         c_field_cost = st.number_input(
             "Затраты на 1 га, в валюте расчёта",
             value=20_000.0, step=500.0, format="%.0f",
-            key="econ_c_field",
-        )
+            key="econ_c_field")
 
         if competitor_extra:
             c_dm = competitor_extra["dm_pct"]
@@ -219,20 +188,14 @@ def render_economics_page():
             m1, m2 = st.columns(2)
             m1.metric("Содержание СВ, %", f"{c_dm:.1f}")
             m2.metric("ОЭ, МДж/кг СВ", f"{c_me:.2f}")
-            st.caption("🔒 Значения подтянуты из анализа. "
-                       "Чтобы ввести вручную — снимите галочку "
-                       "«Использовать данные из анализа» выше.")
+            st.caption("🔒 Значения подтянуты из анализа.")
         else:
-            c_dm = st.number_input(
-                "Содержание СВ, %",
-                value=30.0, step=0.5, format="%.1f",
-                key="econ_c_dm",
-            )
-            c_me = st.number_input(
-                "ОЭ, МДж/кг СВ",
-                value=10.4, step=0.1, format="%.2f",
-                key="econ_c_me",
-            )
+            c_dm = st.number_input("Содержание СВ, %",
+                                     value=30.0, step=0.5, format="%.1f",
+                                     key="econ_c_dm")
+            c_me = st.number_input("ОЭ, МДж/кг СВ",
+                                     value=10.4, step=0.1, format="%.2f",
+                                     key="econ_c_me")
 
         if competitor_extra:
             st.caption(
@@ -264,24 +227,16 @@ def render_economics_page():
     # ================== РАСЧЁТ ==================
     result = calculate_economics(
         silenta={
-            "silo_demand": silo_demand_c,
-            "yield_green": s_yield,
-            "seeding_rate": s_seed_rate,
-            "seed_price": s_seed_price,
-            "field_cost": s_field_cost,
-            "dm_pct": s_dm,
-            "me": s_me,
-            "grain_price": grain_price,
+            "silo_demand": silo_demand_c, "yield_green": s_yield,
+            "seeding_rate": s_seed_rate, "seed_price": s_seed_price,
+            "field_cost": s_field_cost, "dm_pct": s_dm,
+            "me": s_me, "grain_price": grain_price,
         },
         competitor={
-            "silo_demand": silo_demand_c,
-            "yield_green": c_yield,
-            "seeding_rate": c_seed_rate,
-            "seed_price": c_seed_price,
-            "field_cost": c_field_cost,
-            "dm_pct": c_dm,
-            "me": c_me,
-            "grain_price": grain_price,
+            "silo_demand": silo_demand_c, "yield_green": c_yield,
+            "seeding_rate": c_seed_rate, "seed_price": c_seed_price,
+            "field_cost": c_field_cost, "dm_pct": c_dm,
+            "me": c_me, "grain_price": grain_price,
         },
     )
 
@@ -292,8 +247,7 @@ def render_economics_page():
     st.subheader("3. Сравнение гибридов")
     comparison = pd.DataFrame([
         {"Показатель": "Потребность в силосе, т/год",
-         s_name: _fmt(silo_demand_t, 1),
-         c_name: _fmt(silo_demand_t, 1)},
+         s_name: _fmt(silo_demand_t, 1), c_name: _fmt(silo_demand_t, 1)},
         {"Показатель": "Урожайность ЗМ, ц/га",
          s_name: _fmt(s_yield, 1), c_name: _fmt(c_yield, 1)},
         {"Показатель": "Площадь сева, га",
@@ -324,8 +278,7 @@ def render_economics_page():
     e1, e2, e3, e4 = st.columns(4)
     e1.metric("Освобождено площади",
               f"{_fmt(result['freed_area'], 1)} га")
-    e2.metric("Экономия затрат",
-              f"{_fmt(result['saving_field'], 0)}")
+    e2.metric("Экономия затрат", f"{_fmt(result['saving_field'], 0)}")
     e3.metric("Разница ОЭ/га",
               f"{_fmt(result['delta_me_per_ha'], 0)} МДж")
     e4.metric("Эквивалент зерна",
@@ -351,8 +304,7 @@ def render_economics_page():
     elif result["total_saving"] < 0:
         st.error(
             f"При текущих параметрах **{s_name}** проигрывает "
-            f"**{c_name}** на {_fmt(abs(result['total_saving']), 0)}. "
-            f"Проверьте введённые данные."
+            f"**{c_name}** на {_fmt(abs(result['total_saving']), 0)}."
         )
     else:
         st.info("Гибриды экономически равнозначны.")
@@ -408,6 +360,45 @@ def render_economics_page():
         )
 
     st.markdown(econ_ai_text)
+
+    # ================== PDF-ОТЧЁТ ==================
+    st.markdown("---")
+    st.subheader("7. 📄 PDF-отчёт")
+    st.caption("Содержит: таблицу сравнения, лабораторные данные, "
+               "расчёт экономии, графики и вывод ИИ.")
+
+    col_btn, col_dl = st.columns(2)
+
+    with col_btn:
+        if st.button("📄 Подготовить PDF-отчёт",
+                      use_container_width=True, key="econ_pdf_prepare"):
+            with st.spinner("Собираем PDF..."):
+                try:
+                    pdf_bytes = generate_economics_pdf(
+                        result=result,
+                        silenta_name=s_name,
+                        competitor_name=c_name,
+                        silo_demand_t=silo_demand_t,
+                        grain_price=grain_price,
+                        ai_text=econ_ai_text,
+                        silenta_extra=silenta_extra,
+                        competitor_extra=competitor_extra,
+                    )
+                    st.session_state["econ_pdf_bytes"] = pdf_bytes
+                    st.success("PDF готов! Нажмите кнопку справа.")
+                except Exception as e:
+                    st.error(f"Ошибка генерации PDF: {e}")
+
+    with col_dl:
+        if "econ_pdf_bytes" in st.session_state:
+            st.download_button(
+                "💾 Скачать PDF-отчёт",
+                data=st.session_state["econ_pdf_bytes"],
+                file_name="economics_report.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="econ_pdf_download",
+            )
 
     # ================== ИТОГ ==================
     st.markdown("---")
