@@ -108,7 +108,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.header("🌾 Мои корма")
-    st.caption("Настройте параметры ваших кормов. "
+    st.caption("Настройте параметры кормов. "
                "По умолчанию — стандартные справочные значения.")
 
     feeds_override = {}
@@ -127,8 +127,17 @@ with st.sidebar:
         hay_ndf = st.number_input("НДК, г/кг СВ",
                                    200.0, 800.0, float(d["NDF"]), 5.0,
                                    key="my_hay_ndf")
+        hay_starch = st.number_input("Крахмал, г/кг СВ",
+                                      0.0, 200.0,
+                                      float(d.get("starch", 5)), 1.0,
+                                      key="my_hay_starch")
+        hay_rnb = st.number_input("RNB, г/кг СВ",
+                                   -20.0, 20.0,
+                                   float(d.get("RNB", -4)), 0.5,
+                                   key="my_hay_rnb")
         feeds_override["сено"] = {
             "DM": hay_dm, "NEL": hay_nel, "nXP": hay_nxp, "NDF": hay_ndf,
+            "starch": hay_starch, "RNB": hay_rnb,
         }
 
     with st.expander("Сенаж", expanded=False):
@@ -145,9 +154,18 @@ with st.sidebar:
         haylage_ndf = st.number_input("НДК, г/кг СВ",
                                        200.0, 800.0, float(d["NDF"]), 5.0,
                                        key="my_haylage_ndf")
+        haylage_starch = st.number_input("Крахмал, г/кг СВ",
+                                          0.0, 300.0,
+                                          float(d.get("starch", 20)), 1.0,
+                                          key="my_haylage_starch")
+        haylage_rnb = st.number_input("RNB, г/кг СВ",
+                                       -20.0, 20.0,
+                                       float(d.get("RNB", -6)), 0.5,
+                                       key="my_haylage_rnb")
         feeds_override["сенаж"] = {
             "DM": haylage_dm, "NEL": haylage_nel,
             "nXP": haylage_nxp, "NDF": haylage_ndf,
+            "starch": haylage_starch, "RNB": haylage_rnb,
         }
 
     with st.expander("Комбикорм", expanded=False):
@@ -164,16 +182,27 @@ with st.sidebar:
         conc_ndf = st.number_input("НДК, г/кг СВ",
                                     100.0, 500.0, float(d["NDF"]), 5.0,
                                     key="my_conc_ndf")
+        conc_starch = st.number_input("Крахмал, г/кг СВ",
+                                       0.0, 600.0,
+                                       float(d.get("starch", 250)), 5.0,
+                                       key="my_conc_starch")
+        conc_rnb = st.number_input("RNB, г/кг СВ",
+                                    -20.0, 20.0,
+                                    float(d.get("RNB", -2)), 0.5,
+                                    key="my_conc_rnb")
         feeds_override["комбикорм"] = {
             "DM": conc_dm, "NEL": conc_nel,
             "nXP": conc_nxp, "NDF": conc_ndf,
+            "starch": conc_starch, "RNB": conc_rnb,
         }
 
     if st.button("↩️ Сбросить корма", key="reset_feeds"):
         for k in ["my_hay_dm", "my_hay_nel", "my_hay_nxp", "my_hay_ndf",
+                  "my_hay_starch", "my_hay_rnb",
                   "my_haylage_dm", "my_haylage_nel", "my_haylage_nxp",
-                  "my_haylage_ndf",
-                  "my_conc_dm", "my_conc_nel", "my_conc_nxp", "my_conc_ndf"]:
+                  "my_haylage_ndf", "my_haylage_starch", "my_haylage_rnb",
+                  "my_conc_dm", "my_conc_nel", "my_conc_nxp", "my_conc_ndf",
+                  "my_conc_starch", "my_conc_rnb"]:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
@@ -422,6 +451,8 @@ for name, r in rations.items():
         "Жир, кг": round(comp["fat_kg"], 2),
         "Шрот, кг СВ": round(comp["soy_dm"], 2),
         "НДК, % СВ": round(comp["ndf_pct"], 1),
+        "Крахмал, г/кг": round(comp["starch_per_dm"], 0),
+        "RNB, г/кг": round(comp["total_rnb"], 1),
         "NEL, МДж": round(r["total"]["NEL"], 1),
         "Δ NEL": round(r["total"]["NEL"] - r["norms"]["NEL"], 1),
         "nXP, г": round(r["total"]["nXP"], 0),
@@ -460,10 +491,18 @@ for i, (name, r) in enumerate(rations.items()):
                   f"{r['total']['NEL'] - r['norms']['NEL']:+.1f}")
         c2.metric("nXP, г", f"{r['total']['nXP']:.0f}",
                   f"{r['total']['nXP'] - r['norms']['nXP']:+.0f}")
-        c3.metric("СВ, кг", f"{r['total']['dm']:.2f}",
-                  f"{r['total']['dm'] - r['norms']['DM']:+.2f}")
-        c4.metric("НДК, % СВ", f"{r['composition']['ndf_pct']:.1f}",
+        c3.metric("НДК, % СВ", f"{r['composition']['ndf_pct']:.1f}",
                   f"{r['composition']['ndf_pct'] - 34:+.1f}")
+        c4.metric("Крахмал, г/кг СВ",
+                  f"{r['composition']['starch_per_dm']:.0f}",
+                  f"{r['composition']['starch_per_dm'] - 250:+.0f}")
+
+        c5, c6 = st.columns(2)
+        c5.metric("СВ, кг", f"{r['total']['dm']:.2f}",
+                  f"{r['total']['dm'] - r['norms']['DM']:+.2f}")
+        c6.metric("RNB, г/кг СВ",
+                  f"{r['composition']['total_rnb']:.1f}",
+                  f"{r['composition']['total_rnb']:+.1f}")
 
         st.dataframe(ration_to_dataframe(r), use_container_width=True)
 
@@ -476,8 +515,8 @@ for i, (name, r) in enumerate(rations.items()):
 
 # ================== ✏️ РЕДАКТИРОВАНИЕ ==================
 st.header("✏️ Редактирование рациона")
-st.caption("Выберите образец и меняйте состав — баланс NEL, nXP и НДК "
-           "пересчитывается в реальном времени.")
+st.caption("Выберите образец и меняйте состав — баланс NEL, nXP, НДК, "
+           "крахмала и RNB пересчитывается в реальном времени.")
 
 silo_inputs = {s["name"]: s for s in analysis["ratings"]}
 sel_name = st.selectbox("Образец для редактирования:",
@@ -531,6 +570,14 @@ e3.metric("СВ, кг", f"{edited['total']['dm']:.2f}",
           f"{edited['total']['dm'] - edited['norms']['DM']:+.2f}")
 e4.metric("НДК, % СВ", f"{edited['composition']['ndf_pct']:.1f}",
           f"{edited['composition']['ndf_pct'] - 34:+.1f}")
+
+e5, e6 = st.columns(2)
+e5.metric("Крахмал, г/кг СВ",
+          f"{edited['composition']['starch_per_dm']:.0f}",
+          f"{edited['composition']['starch_per_dm'] - 250:+.0f}")
+e6.metric("RNB, г/кг СВ",
+          f"{edited['composition']['total_rnb']:.1f}",
+          f"{edited['composition']['total_rnb']:+.1f}")
 
 st.dataframe(ration_to_dataframe(edited), use_container_width=True)
 
