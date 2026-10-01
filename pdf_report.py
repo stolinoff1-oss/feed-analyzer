@@ -22,7 +22,6 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 
-# === Контакт в колонтитуле ===
 CONTACT_EMAIL = "viktar.hrechka@syngenta.com"
 CONTACT_TEXT = f"По всем вопросам: {CONTACT_EMAIL}"
 
@@ -45,45 +44,36 @@ BORDER = colors.HexColor("#D5DBDB")
 # =============== КОЛОНТИТУЛЫ ===============
 
 def _draw_page_decorations(canvas, doc):
-    """Рисует лого1 (слева), лого3 (справа), email (по центру) и номер стр."""
     canvas.saveState()
     page_w, page_h = A4
-
     logo_height = 9 * mm
     top_pad = 8 * mm
     side_pad = 15 * mm
 
-    # --- logo1: слева сверху ---
     if os.path.exists("logo1.png"):
         try:
             img = ImageReader("logo1.png")
             iw, ih = img.getSize()
             w = logo_height * iw / ih
-            canvas.drawImage(
-                "logo1.png",
-                side_pad, page_h - top_pad - logo_height,
-                width=w, height=logo_height,
-                preserveAspectRatio=True, mask="auto",
-            )
+            canvas.drawImage("logo1.png", side_pad,
+                              page_h - top_pad - logo_height,
+                              width=w, height=logo_height,
+                              preserveAspectRatio=True, mask="auto")
         except Exception:
             pass
 
-    # --- logo3: справа сверху ---
     if os.path.exists("logo3.png"):
         try:
             img = ImageReader("logo3.png")
             iw, ih = img.getSize()
             w = logo_height * iw / ih
-            canvas.drawImage(
-                "logo3.png",
-                page_w - side_pad - w, page_h - top_pad - logo_height,
-                width=w, height=logo_height,
-                preserveAspectRatio=True, mask="auto",
-            )
+            canvas.drawImage("logo3.png", page_w - side_pad - w,
+                              page_h - top_pad - logo_height,
+                              width=w, height=logo_height,
+                              preserveAspectRatio=True, mask="auto")
         except Exception:
             pass
 
-    # --- email по центру ---
     canvas.setFont("DejaVu", 8)
     canvas.setFillColor(PRIMARY)
     tw = stringWidth(CONTACT_TEXT, "DejaVu", 8)
@@ -91,7 +81,6 @@ def _draw_page_decorations(canvas, doc):
                        page_h - top_pad - logo_height / 2 - 3,
                        CONTACT_TEXT)
 
-    # --- разделительная линия под шапкой ---
     canvas.setStrokeColor(BORDER)
     canvas.setLineWidth(0.5)
     canvas.line(side_pad,
@@ -99,7 +88,6 @@ def _draw_page_decorations(canvas, doc):
                 page_w - side_pad,
                 page_h - top_pad - logo_height - 4 * mm)
 
-    # --- номер страницы внизу ---
     canvas.setFont("DejaVu", 8)
     canvas.setFillColor(GREY)
     page_num = f"Страница {doc.page}"
@@ -251,7 +239,6 @@ def _md_to_story(text: str, styles):
     while i < len(lines):
         line = lines[i].rstrip()
 
-        # --- markdown-таблица ---
         if (line.startswith("|") and line.endswith("|")
                 and i + 1 < len(lines)
                 and re.match(r"^\|[\s\-:|]+\|$", lines[i + 1].strip())):
@@ -351,7 +338,7 @@ def _fmt_correction(c) -> str:
     return str(c)
 
 
-# =============== СБОРКА PDF ===============
+# =============== СТИЛИ И ТАБЛИЦЫ ===============
 
 def _make_styles():
     styles = getSampleStyleSheet()
@@ -403,23 +390,22 @@ def _make_table(data, col_widths, header_color=PRIMARY):
     return t
 
 
+# =============== PDF ДЛЯ АНАЛИЗА КОРМОВ ===============
+
 def generate_pdf(analysis: dict, rations: dict, ai_text: str,
                  live_weight: float, milk_yield: float) -> bytes:
     buffer = io.BytesIO()
-    # Увеличены поля сверху/снизу — чтобы контент не залезал на колонтитулы
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
         leftMargin=15 * mm, rightMargin=15 * mm,
         topMargin=25 * mm, bottomMargin=18 * mm,
-        title="Отчёт по анализу кормов",
-        author="Feed Analyzer",
+        title="Отчёт по анализу кормов", author="Feed Analyzer",
     )
 
     styles = _make_styles()
     story = []
     date_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
 
-    # ---- Титул ----
     story.append(Paragraph("Отчёт по анализу кормов", styles["pdf_title"]))
     story.append(Paragraph(f"Сформирован: {date_str}", styles["pdf_small"]))
     story.append(Spacer(1, 6))
@@ -431,7 +417,6 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
         styles["pdf_body"]))
     story.append(Spacer(1, 10))
 
-    # ---- 1. Сводная таблица ----
     story.append(Paragraph("1. Сводная таблица образцов", styles["pdf_h1"]))
     summary_data = [["№", "Образец", "Балл", "NEL-VC",
                      "Крахмал", "НДК", "RNB"]]
@@ -449,7 +434,6 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
                                22*mm, 18*mm, 20*mm]))
     story.append(PageBreak())
 
-    # ---- 2. Графики ----
     story.append(Paragraph("2. Графики сравнения", styles["pdf_h1"]))
 
     df = pd.DataFrame([{
@@ -501,13 +485,10 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
                                 styles["pdf_small"]))
     story.append(PageBreak())
 
-    # ---- 3. Рационы ----
     story.append(Paragraph("3. Расчёт рационов для всех образцов",
                             styles["pdf_h1"]))
-
     for i, (name, r) in enumerate(rations.items(), 1):
         story.append(Paragraph(f"3.{i}. {name}", styles["pdf_h2"]))
-
         norm = r["norms"]
         tot = r["total"]
         metrics = [
@@ -525,7 +506,6 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
                                   [42*mm, 28*mm, 28*mm, 42*mm],
                                   header_color=ACCENT))
         story.append(Spacer(1, 5))
-
         comp = [["Корм", "СВ, кг", "Нат. вес, кг",
                  "NEL, МДж", "nXP, г", "НДК, г"]]
         for feed, vals in r["ration"].items():
@@ -535,33 +515,203 @@ def generate_pdf(analysis: dict, rations: dict, ai_text: str,
         story.append(_make_table(comp,
                                   [52*mm, 20*mm, 28*mm,
                                    24*mm, 20*mm, 22*mm]))
-
         if r["corrections"]:
             story.append(Spacer(1, 4))
             story.append(Paragraph("<b>Корректировки:</b>", styles["pdf_body"]))
             for c in r["corrections"]:
                 story.append(Paragraph(f"• {_fmt_correction(c)}",
                                         styles["pdf_bullet"]))
-
         story.append(Spacer(1, 12))
 
     story.append(PageBreak())
-
-    # ---- 4. Выводы AI ----
     story.append(Paragraph("4. Выводы зоотехника (ИИ)", styles["pdf_h1"]))
     story.append(Spacer(1, 4))
     story.extend(_md_to_story(ai_text, styles))
+    story.append(Spacer(1, 20))
+    story.append(Paragraph(
+        f"Отчёт сформирован автоматически • {date_str} • Feed Analyzer",
+        styles["pdf_small"]))
+
+    doc.build(story, onFirstPage=_draw_page_decorations,
+              onLaterPages=_draw_page_decorations)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+# =============== PDF ДЛЯ ЭКОНОМИКИ ===============
+
+def generate_economics_pdf(result: dict,
+                            silenta_name: str,
+                            competitor_name: str,
+                            silo_demand_t: float,
+                            grain_price: float,
+                            ai_text: str = "",
+                            silenta_extra: dict = None,
+                            competitor_extra: dict = None) -> bytes:
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=15 * mm, rightMargin=15 * mm,
+        topMargin=25 * mm, bottomMargin=18 * mm,
+        title="Экономика выращивания силосной кукурузы",
+        author="Feed Analyzer",
+    )
+
+    styles = _make_styles()
+    story = []
+    date_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+
+    s = result["silenta"]
+    c = result["competitor"]
+
+    # ---- Титул ----
+    story.append(Paragraph("Экономика выращивания силосной кукурузы",
+                            styles["pdf_title"]))
+    story.append(Paragraph(f"Сформирован: {date_str}", styles["pdf_small"]))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        f"<b>Потребность в силосе:</b> "
+        f"{silo_demand_t:,.1f} т/год".replace(",", " "),
+        styles["pdf_body"]))
+    story.append(Paragraph(
+        f"<b>Цена кукурузного зерна:</b> "
+        f"{grain_price:,.0f} за 1 т".replace(",", " "),
+        styles["pdf_body"]))
+    story.append(Spacer(1, 10))
+
+    # ---- 1. Общие параметры ----
+    story.append(Paragraph("1. Общие параметры", styles["pdf_h1"]))
+    common = [
+        ["Показатель", silenta_name, competitor_name],
+        ["Урожайность ЗМ, ц/га",
+         f"{s['yield_green']:.1f}", f"{c['yield_green']:.1f}"],
+        ["Содержание СВ, %", f"{s['dm_pct']:.1f}", f"{c['dm_pct']:.1f}"],
+        ["ОЭ, МДж/кг СВ", f"{s['me']:.2f}", f"{c['me']:.2f}"],
+    ]
+    story.append(_make_table(common,
+                              [70*mm, 55*mm, 55*mm]))
+    story.append(Spacer(1, 10))
+
+    # ---- 2. Сравнение гибридов ----
+    story.append(Paragraph("2. Сравнение гибридов", styles["pdf_h1"]))
+    comparison = [
+        ["Показатель", silenta_name, competitor_name],
+        ["Площадь сева, га", f"{s['area']:.1f}", f"{c['area']:.1f}"],
+        ["Затраты на семена, на 1 га",
+         f"{s['seed_cost_per_ha']:,.0f}".replace(",", " "),
+         f"{c['seed_cost_per_ha']:,.0f}".replace(",", " ")],
+        ["Затраты на всю площадь",
+         f"{s['total_cost']:,.0f}".replace(",", " "),
+         f"{c['total_cost']:,.0f}".replace(",", " ")],
+        ["Урожайность СВ, ц/га",
+         f"{s['dm_yield']:.1f}", f"{c['dm_yield']:.1f}"],
+        ["Валовый сбор СВ, ц",
+         f"{s['dm_total']:,.0f}".replace(",", " "),
+         f"{c['dm_total']:,.0f}".replace(",", " ")],
+        ["Выход ОЭ, МДж/га",
+         f"{s['me_per_ha']:,.0f}".replace(",", " "),
+         f"{c['me_per_ha']:,.0f}".replace(",", " ")],
+    ]
+    story.append(_make_table(comparison,
+                              [70*mm, 55*mm, 55*mm]))
+    story.append(Spacer(1, 10))
+
+    # ---- 3. Лабораторные данные (если есть) ----
+    if silenta_extra or competitor_extra:
+        story.append(Paragraph("3. Лабораторные данные (из анализа)",
+                                styles["pdf_h1"]))
+        lab_data = [["Показатель", silenta_name, competitor_name]]
+
+        def _v(extra, key):
+            if not extra:
+                return "—"
+            val = extra.get(key)
+            return "—" if val is None else str(val)
+
+        lab_data.append(["Крахмал, г/кг СВ",
+                         _v(silenta_extra, "starch"),
+                         _v(competitor_extra, "starch")])
+        lab_data.append(["СП, г/кг СВ",
+                         _v(silenta_extra, "CP"),
+                         _v(competitor_extra, "CP")])
+        lab_data.append(["НДК, г/кг СВ",
+                         _v(silenta_extra, "NDF"),
+                         _v(competitor_extra, "NDF")])
+        lab_data.append(["Перев. ОВ, %",
+                         _v(silenta_extra, "dOM"),
+                         _v(competitor_extra, "dOM")])
+        lab_data.append(["RNB, г/кг СВ",
+                         _v(silenta_extra, "RNB"),
+                         _v(competitor_extra, "RNB")])
+        story.append(_make_table(lab_data,
+                                  [70*mm, 55*mm, 55*mm],
+                                  header_color=ACCENT))
+        story.append(Spacer(1, 10))
+        next_section = 4
+    else:
+        next_section = 3
+
+    # ---- 4 (или 3). Экономия ----
+    story.append(Paragraph(f"{next_section}. Экономия от выбора Силенты",
+                            styles["pdf_h1"]))
+    econ_data = [
+        ["Показатель", "Значение"],
+        ["Освобождено площади",
+         f"{result['freed_area']:.1f} га"],
+        ["Экономия затрат на выращивание",
+         f"{result['saving_field']:,.0f}".replace(",", " ")],
+        ["Разница выхода ОЭ",
+         f"{result['delta_me_per_ha']:,.0f} МДж/га".replace(",", " ")],
+        ["Эквивалент кукурузного зерна",
+         f"{result['grain_equiv_per_ha']:,.0f} кг/га".replace(",", " ")],
+        ["Экономия на зерне",
+         f"{result['saving_grain']:,.0f}".replace(",", " ")],
+        ["ОБЩАЯ ЭКОНОМИЯ",
+         f"{result['total_saving']:,.0f}".replace(",", " ")],
+        ["Экономия на гектар",
+         f"{result['total_saving_per_ha']:,.0f} /га".replace(",", " ")],
+    ]
+    story.append(_make_table(econ_data,
+                              [95*mm, 85*mm],
+                              header_color=ACCENT))
+    story.append(PageBreak())
+
+    # ---- 5. Графики ----
+    story.append(Paragraph(f"{next_section + 1}. Графики сравнения",
+                            styles["pdf_h1"]))
+
+    story.append(Paragraph("Выход ОЭ с гектара (МДж/га)",
+                            styles["pdf_h2"]))
+    story.append(Image(_bar_chart(
+        [silenta_name, competitor_name],
+        [s["me_per_ha"], c["me_per_ha"]],
+        "Выход ОЭ (МДж/га)"), width=140*mm, height=60*mm))
+
+    story.append(Paragraph("Затраты на всю площадь",
+                            styles["pdf_h2"]))
+    story.append(Image(_bar_chart(
+        [silenta_name, competitor_name],
+        [s["total_cost"], c["total_cost"]],
+        "Затраты на всю площадь", color="#3498DB"),
+        width=140*mm, height=60*mm))
+    story.append(PageBreak())
+
+    # ---- 6. AI-вывод ----
+    story.append(Paragraph(f"{next_section + 2}. Вывод экономиста (ИИ)",
+                            styles["pdf_h1"]))
+    story.append(Spacer(1, 4))
+    if ai_text:
+        story.extend(_md_to_story(ai_text, styles))
+    else:
+        story.append(Paragraph("AI-вывод не сформирован.",
+                                styles["pdf_body"]))
 
     story.append(Spacer(1, 20))
     story.append(Paragraph(
         f"Отчёт сформирован автоматически • {date_str} • Feed Analyzer",
         styles["pdf_small"]))
 
-    # === Собираем PDF с колонтитулами на каждой странице ===
-    doc.build(
-        story,
-        onFirstPage=_draw_page_decorations,
-        onLaterPages=_draw_page_decorations,
-    )
+    doc.build(story, onFirstPage=_draw_page_decorations,
+              onLaterPages=_draw_page_decorations)
     buffer.seek(0)
     return buffer.getvalue()
