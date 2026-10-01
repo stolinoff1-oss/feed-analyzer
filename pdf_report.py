@@ -549,7 +549,9 @@ def generate_economics_pdf(result: dict,
                             silenta_extra: dict = None,
                             competitor_extra: dict = None,
                             feed_econ: dict = None,
-                            feed_params: dict = None) -> bytes:
+                            feed_params: dict = None,
+                            surplus: dict = None,
+                            total_grand: float = 0.0) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=A4,
@@ -566,7 +568,6 @@ def generate_economics_pdf(result: dict,
     s = result["silenta"]
     c = result["competitor"]
 
-    # ---- Титул ----
     story.append(Paragraph("Экономика выращивания силосной кукурузы",
                             styles["pdf_title"]))
     story.append(Paragraph(f"Сформирован: {date_str}", styles["pdf_small"]))
@@ -581,7 +582,6 @@ def generate_economics_pdf(result: dict,
         styles["pdf_body"]))
     story.append(Spacer(1, 10))
 
-    # ---- 1. Общие параметры ----
     story.append(Paragraph("1. Общие параметры", styles["pdf_h1"]))
     common = [
         ["Показатель", silenta_name, competitor_name],
@@ -593,7 +593,6 @@ def generate_economics_pdf(result: dict,
     story.append(_make_table(common, [70*mm, 55*mm, 55*mm]))
     story.append(Spacer(1, 10))
 
-    # ---- 2. Сравнение гибридов ----
     story.append(Paragraph("2. Сравнение гибридов", styles["pdf_h1"]))
     comparison = [
         ["Показатель", silenta_name, competitor_name],
@@ -618,7 +617,6 @@ def generate_economics_pdf(result: dict,
 
     next_section = 3
 
-    # ---- 3. Лабораторные данные ----
     if silenta_extra or competitor_extra:
         story.append(Paragraph(f"{next_section}. Лабораторные данные",
                                 styles["pdf_h1"]))
@@ -633,8 +631,6 @@ def generate_economics_pdf(result: dict,
             ["Показатель", silenta_name, competitor_name],
             ["Крахмал, г/кг СВ",
              _v(silenta_extra, "starch"), _v(competitor_extra, "starch")],
-            ["СП, г/кг СВ",
-             _v(silenta_extra, "CP"), _v(competitor_extra, "CP")],
             ["НДК, г/кг СВ",
              _v(silenta_extra, "NDF"), _v(competitor_extra, "NDF")],
             ["Перев. ОВ, %",
@@ -647,7 +643,6 @@ def generate_economics_pdf(result: dict,
         story.append(Spacer(1, 10))
         next_section += 1
 
-    # ---- Экономия на выращивании ----
     story.append(Paragraph(f"{next_section}. Экономия на выращивании",
                             styles["pdf_h1"]))
     econ_data = [
@@ -661,35 +656,54 @@ def generate_economics_pdf(result: dict,
          f"{result['grain_equiv_per_ha']:,.0f} кг/га".replace(",", " ")],
         ["Экономия на зерне",
          f"{result['saving_grain']:,.0f}".replace(",", " ")],
-        ["ОБЩАЯ ЭКОНОМИЯ",
+        ["ИТОГО по выращиванию",
          f"{result['total_saving']:,.0f}".replace(",", " ")],
-        ["Экономия на гектар",
-         f"{result['total_saving_per_ha']:,.0f} /га".replace(",", " ")],
     ]
     story.append(_make_table(econ_data, [95*mm, 85*mm], header_color=ACCENT))
     story.append(Spacer(1, 10))
     next_section += 1
 
-    # ---- Экономия на кормах ----
+    if surplus:
+        story.append(Paragraph(f"{next_section}. Излишек силоса "
+                                f"(при одинаковой площади)",
+                                styles["pdf_h1"]))
+        story.append(Paragraph(
+            f"Если оба гибрида засеять на одинаковую площадь "
+            f"({surplus['same_area']:.1f} га), то {silenta_name} даст "
+            f"больше силоса. Этот излишек можно продать.",
+            styles["pdf_body"]))
+        story.append(Spacer(1, 6))
+
+        sur_data = [
+            ["Показатель", "Значение"],
+            ["Излишек СВ", f"{surplus['surplus_dm_t']:,.1f} т СВ"
+                              .replace(",", " ")],
+            ["Излишек ЗМ", f"{surplus['surplus_gm_t']:,.1f} т ЗМ"
+                              .replace(",", " ")],
+            ["Эквивалент зерна по ОЭ",
+             f"{surplus['surplus_grain_t']:,.1f} т зерна"
+             .replace(",", " ")],
+            ["Оценка: продажа силоса",
+             f"{surplus['saving_sale']:,.0f}".replace(",", " ")],
+            ["Оценка: замена зерна",
+             f"{surplus['saving_grain_equiv']:,.0f}".replace(",", " ")],
+        ]
+        story.append(_make_table(sur_data, [95*mm, 85*mm],
+                                  header_color=ACCENT))
+        story.append(Spacer(1, 10))
+        next_section += 1
+
     if feed_econ and feed_params:
         story.append(Paragraph(
             f"{next_section}. Экономия на кормах "
-            f"({feed_params.get('n_cows', 0)} голов, "
-            f"удой {feed_params.get('milk_yield', 0)} кг/сут)",
+            f"({feed_params.get('n_cows', 0)} голов)",
             styles["pdf_h1"]))
-        story.append(Paragraph(
-            f"<b>Цены:</b> комбикорм {feed_params.get('conc_price_t', 0):,.0f}, "
-            f"силос {feed_params.get('silo_price_t', 0):,.0f}, "
-            f"сено {feed_params.get('hay_price_t', 0):,.0f}, "
-            f"сенаж {feed_params.get('haylage_price_t', 0):,.0f}".replace(",", " "),
-            styles["pdf_body"]))
-        story.append(Spacer(1, 6))
 
         story.append(Paragraph(
             "Расход на 1 корову в день (кг нат. веса)",
             styles["pdf_h2"]))
         feed_table = [
-            ["Корм", silenta_name, competitor_name, "Экономия"],
+            ["Корм", silenta_name, competitor_name, "Разница"],
             ["Силос",
              f"{feed_econ['silo1_nat']:.2f}",
              f"{feed_econ['silo2_nat']:.2f}",
@@ -708,6 +722,10 @@ def generate_economics_pdf(result: dict,
              f"{feed_econ['delta_haylage_nat']:+.2f}"],
         ]
         story.append(_make_table(feed_table, [40*mm, 40*mm, 40*mm, 40*mm]))
+        story.append(Paragraph(
+            "Отрицательная разница по силосу перекрывается экономией "
+            "на комбикорме.",
+            styles["pdf_small"]))
         story.append(Spacer(1, 8))
 
         story.append(Paragraph(
@@ -733,33 +751,36 @@ def generate_economics_pdf(result: dict,
         ]
         story.append(_make_table(saving_table, [60*mm, 55*mm, 60*mm],
                                   header_color=ACCENT))
-        story.append(Spacer(1, 8))
-
-        grand_total = result["total_saving"] + feed_econ["total_feed_year"]
-        story.append(Paragraph("Совокупная годовая экономия",
-                                styles["pdf_h2"]))
-        grand_table = [
-            ["Источник", "В год"],
-            ["Выращивание",
-             f"{result['total_saving']:,.0f}".replace(",", " ")],
-            ["Кормление",
-             f"{feed_econ['total_feed_year']:,.0f}".replace(",", " ")],
-            ["ИТОГО за год",
-             f"{grand_total:,.0f}".replace(",", " ")],
-        ]
-        story.append(_make_table(grand_table, [95*mm, 85*mm],
-                                  header_color=PRIMARY))
         story.append(Spacer(1, 10))
         next_section += 1
 
+    story.append(Paragraph(f"{next_section}. Совокупная годовая экономия",
+                            styles["pdf_h1"]))
+    grand_rows = [
+        ["Источник", "В год"],
+        ["Выращивание",
+         f"{result['total_saving']:,.0f}".replace(",", " ")],
+    ]
+    if feed_econ:
+        grand_rows.append(["Кормление",
+                            f"{feed_econ['total_feed_year']:,.0f}"
+                            .replace(",", " ")])
+    if surplus:
+        grand_rows.append(["Излишек силоса",
+                            f"{surplus['saving_sale']:,.0f}"
+                            .replace(",", " ")])
+    grand_rows.append(["ИТОГО за год",
+                        f"{total_grand:,.0f}".replace(",", " ")])
+    story.append(_make_table(grand_rows, [95*mm, 85*mm],
+                              header_color=PRIMARY))
+    story.append(Spacer(1, 10))
+    next_section += 1
+
     story.append(PageBreak())
 
-    # ---- Графики ----
-    story.append(Paragraph(f"{next_section}. Графики сравнения",
-                            styles["pdf_h1"]))
+    story.append(Paragraph(f"{next_section}. Графики", styles["pdf_h1"]))
 
-    story.append(Paragraph("Выход ОЭ с гектара (МДж/га)",
-                            styles["pdf_h2"]))
+    story.append(Paragraph("Выход ОЭ с гектара", styles["pdf_h2"]))
     story.append(Image(_bar_chart(
         [silenta_name, competitor_name],
         [s["me_per_ha"], c["me_per_ha"]],
@@ -773,7 +794,8 @@ def generate_economics_pdf(result: dict,
         width=140*mm, height=60*mm))
 
     if feed_econ:
-        story.append(Paragraph("Экономия на кормах в год", styles["pdf_h2"]))
+        story.append(Paragraph("Экономия на кормах в год",
+                                styles["pdf_h2"]))
         story.append(Image(_bar_chart(
             ["Силос", "Комбикорм", "Сено", "Сенаж"],
             [feed_econ["saving_silo_year"],
@@ -785,7 +807,6 @@ def generate_economics_pdf(result: dict,
 
     story.append(PageBreak())
 
-    # ---- AI-вывод ----
     story.append(Paragraph(f"{next_section + 1}. Вывод экономиста (ИИ)",
                             styles["pdf_h1"]))
     story.append(Spacer(1, 4))
