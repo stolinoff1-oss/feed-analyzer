@@ -454,7 +454,7 @@ if st.button("💾 Использовать этот рацион в PDF", key="
 
 
 # ================== AI ==================
-st.header("🩺 Рекомендации зоотехника (ИИ)")
+st.header("🩺 Рекомендации")
 col_a, col_b = st.columns([1, 4])
 with col_a:
     refresh = st.button("🔄 Обновить")
