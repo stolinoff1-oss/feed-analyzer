@@ -27,7 +27,6 @@ def _normalize(s: str) -> str:
     return s.strip().lower()
 
 
-# СП полностью убран из анализа
 FIND_SPECS = [
     ("sample_id", ["номер образца"], []),
     ("feed_name", ["наименование корма"], []),
@@ -41,6 +40,7 @@ FIND_SPECS = [
     ("ADL",       ["кислотно-детергентный лингнин", "adl"], []),
     ("NDFd",      ["ндк-перевариваемость", "ndf digest"], []),
     ("dOM",       ["переваримость ов"], []),
+    ("ME",        ["обменная энергия", "(me)"], ["метабол"]),
     ("NEL_VC",    ["nel-vc"], []),
     ("NEL",       ["чистая энергия лактации"], ["nel-vc"]),
     ("nXP",       ["(nxp)", " nxp"], []),
@@ -89,7 +89,7 @@ def load_feed_data(path: str) -> pd.DataFrame:
 def analyze_feeds(df: pd.DataFrame) -> dict:
     result = {"samples": [], "leaders": {}, "ratings": []}
     numeric_keys = ["DM", "starch", "sugar", "NDF", "ADF", "NDFd", "dOM",
-                    "NEL", "NEL_VC", "nXP", "RNB", "structure"]
+                    "NEL", "NEL_VC", "ME", "nXP", "RNB", "structure"]
 
     for _, row in df.iterrows():
         sample = {"id": row.get("sample_id"),
@@ -113,7 +113,6 @@ def analyze_feeds(df: pd.DataFrame) -> dict:
         "best_RNB":   _leader("RNB", True),
     }
 
-    # Балл без вклада СП
     for s in result["samples"]:
         score = 0.0
         if s["NEL_VC"] is not None: score += (s["NEL_VC"] - 6.5) * 30
@@ -137,6 +136,7 @@ def feeds_to_dataframe(result: dict) -> pd.DataFrame:
             "DM": s["DM"], "Крахмал": s["starch"],
             "Сахар": s["sugar"], "НДК": s["NDF"], "КДК": s["ADF"],
             "Перев. ОВ, %": s["dOM"], "NEL": s["NEL"], "NEL-VC": s["NEL_VC"],
+            "ME": s.get("ME"),
             "nXP": s["nXP"], "RNB": s["RNB"], "Балл": s["score"],
         })
     return pd.DataFrame(rows)
@@ -165,6 +165,7 @@ def dataframe_from_input(samples: list) -> pd.DataFrame:
             "dOM": _num(s.get("dOM")),
             "NEL": nel,
             "NEL_VC": nel_vc,
+            "ME": _num(s.get("ME")),
             "nXP": _num(s.get("nXP")),
             "RNB": _num(s.get("RNB")),
             "structure": _num(s.get("structure")),
