@@ -26,13 +26,21 @@ def _fmt(x, digits=0):
 
 def _get_sample_params(sample: dict) -> dict:
     """Извлекает из образца анализа параметры для экономики."""
+    dm_kg = sample.get("DM")  # г/кг → % = /10
+    dm_pct = dm_kg / 10 if dm_kg else 35.0
+
+    # ОЭ (ME) — если нет, fallback на NEL-VC
+    me = sample.get("ME")
+    if not me:
+        me = sample.get("NEL-VC") or sample.get("NEL_VC") or 11.0
+
     return {
-        "dm_pct": sample.get("DM") and sample["DM"] / 10 or 35,
-        "me": sample.get("ME") or sample.get("NEL_VC") or 11.0,
-        "starch": sample.get("starch"),
-        "CP": sample.get("CP"),
-        "NDF": sample.get("NDF"),
-        "dOM": sample.get("dOM"),
+        "dm_pct": dm_pct,
+        "me": me,
+        "starch": sample.get("Крахмал"),
+        "CP": sample.get("СП, г/кг") or sample.get("CP"),
+        "NDF": sample.get("НДК"),
+        "dOM": sample.get("Перев. ОВ, %"),
         "RNB": sample.get("RNB"),
     }
 
@@ -52,8 +60,9 @@ def render_economics_page():
             f"🔬 Использовать данные из анализа кормов "
             f"(загружено {len(analysis_records)} образцов)",
             value=False,
-            help="При включении можно выбрать образец из анализа, его "
-                 "СВ% и ОЭ подтянутся автоматически.",
+            help="При включении можно выбрать образец из анализа — его "
+                 "СВ% и ОЭ подтянутся автоматически и будут недоступны "
+                 "для ручного редактирования.",
         )
     else:
         st.info("💡 Данные анализа кормов не загружены. "
@@ -86,7 +95,6 @@ def render_economics_page():
                  "всё в одной валюте, без пересчёта.",
         )
 
-    # Пересчёт т → ц (внутренние формулы работают в центнерах)
     silo_demand_c = silo_demand_t * 10
 
     # ================== ДВА ГИБРИДА ==================
@@ -113,9 +121,6 @@ def render_economics_page():
                         silenta_extra = _get_sample_params(r)
                         break
 
-        s_dm_default = silenta_extra["dm_pct"] if silenta_extra else 34.0
-        s_me_default = silenta_extra["me"] if silenta_extra else 10.8
-
         s_yield = st.number_input(
             "Урожайность ЗМ, ц/га",
             value=430.0, step=5.0, format="%.1f",
@@ -136,16 +141,29 @@ def render_economics_page():
             value=20_000.0, step=500.0, format="%.0f",
             key="econ_s_field",
         )
-        s_dm = st.number_input(
-            "Содержание СВ, %",
-            value=float(s_dm_default), step=0.5, format="%.1f",
-            key="econ_s_dm",
-        )
-        s_me = st.number_input(
-            "ОЭ, МДж/кг СВ",
-            value=float(s_me_default), step=0.1, format="%.2f",
-            key="econ_s_me",
-        )
+
+        # СВ% и ОЭ — из анализа или вручную
+        if silenta_extra:
+            s_dm = silenta_extra["dm_pct"]
+            s_me = silenta_extra["me"]
+            st.markdown("**Содержание СВ и ОЭ — из лабораторного анализа:**")
+            m1, m2 = st.columns(2)
+            m1.metric("Содержание СВ, %", f"{s_dm:.1f}")
+            m2.metric("ОЭ, МДж/кг СВ", f"{s_me:.2f}")
+            st.caption("🔒 Значения подтянуты из анализа. "
+                       "Чтобы ввести вручную — снимите галочку "
+                       "«Использовать данные из анализа» выше.")
+        else:
+            s_dm = st.number_input(
+                "Содержание СВ, %",
+                value=34.0, step=0.5, format="%.1f",
+                key="econ_s_dm",
+            )
+            s_me = st.number_input(
+                "ОЭ, МДж/кг СВ",
+                value=10.8, step=0.1, format="%.2f",
+                key="econ_s_me",
+            )
 
         if silenta_extra:
             st.caption(
@@ -173,9 +191,6 @@ def render_economics_page():
                         competitor_extra = _get_sample_params(r)
                         break
 
-        c_dm_default = competitor_extra["dm_pct"] if competitor_extra else 30.0
-        c_me_default = competitor_extra["me"] if competitor_extra else 10.4
-
         c_yield = st.number_input(
             "Урожайность ЗМ, ц/га",
             value=400.0, step=5.0, format="%.1f",
@@ -196,16 +211,28 @@ def render_economics_page():
             value=20_000.0, step=500.0, format="%.0f",
             key="econ_c_field",
         )
-        c_dm = st.number_input(
-            "Содержание СВ, %",
-            value=float(c_dm_default), step=0.5, format="%.1f",
-            key="econ_c_dm",
-        )
-        c_me = st.number_input(
-            "ОЭ, МДж/кг СВ",
-            value=float(c_me_default), step=0.1, format="%.2f",
-            key="econ_c_me",
-        )
+
+        if competitor_extra:
+            c_dm = competitor_extra["dm_pct"]
+            c_me = competitor_extra["me"]
+            st.markdown("**Содержание СВ и ОЭ — из лабораторного анализа:**")
+            m1, m2 = st.columns(2)
+            m1.metric("Содержание СВ, %", f"{c_dm:.1f}")
+            m2.metric("ОЭ, МДж/кг СВ", f"{c_me:.2f}")
+            st.caption("🔒 Значения подтянуты из анализа. "
+                       "Чтобы ввести вручную — снимите галочку "
+                       "«Использовать данные из анализа» выше.")
+        else:
+            c_dm = st.number_input(
+                "Содержание СВ, %",
+                value=30.0, step=0.5, format="%.1f",
+                key="econ_c_dm",
+            )
+            c_me = st.number_input(
+                "ОЭ, МДж/кг СВ",
+                value=10.4, step=0.1, format="%.2f",
+                key="econ_c_me",
+            )
 
         if competitor_extra:
             st.caption(
@@ -217,7 +244,6 @@ def render_economics_page():
             )
 
     # ================== ПРЕДУПРЕЖДЕНИЯ ==================
-    # Только физически невозможные значения — без привязки к валюте
     warn_list = []
     if s_yield <= 0 or c_yield <= 0:
         warn_list.append("⚠️ Урожайность должна быть больше 0.")
@@ -391,7 +417,6 @@ def render_economics_page():
         "кукурузного зерна (1 кг зерна = 12.835 МДж).\n\n"
         "2. Эквивалент × цена зерна = экономия на покупке зерна.\n\n"
         "3. Плюс — экономия затрат на выращивание за счёт меньшей площади.\n\n"
-        "**Все суммы — в одной валюте расчёта** (BYN, RUB, KZT и т.д. — "
-        "на ваш выбор). Потребность в силосе вводится в тоннах, внутри "
-        "программы пересчитывается в центнеры (1 т = 10 ц)."
+        "**Все суммы — в одной валюте расчёта** (BYN, RUB, KZT и т.д.). "
+        "Потребность в силосе вводится в тоннах (1 т = 10 ц)."
     )
