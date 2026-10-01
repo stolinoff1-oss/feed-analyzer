@@ -807,13 +807,13 @@ def generate_economics_pdf(result: dict,
 
     story.append(PageBreak())
 
-    story.append(Paragraph(f"{next_section + 1}. Вывод экономиста (ИИ)",
+    story.append(Paragraph(f"{next_section + 1}. Экономический вывод",
                             styles["pdf_h1"]))
     story.append(Spacer(1, 4))
     if ai_text:
         story.extend(_md_to_story(ai_text, styles))
     else:
-        story.append(Paragraph("AI-вывод не сформирован.",
+        story.append(Paragraph("Вывод не сформирован.",
                                 styles["pdf_body"]))
 
     story.append(Spacer(1, 20))
