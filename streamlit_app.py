@@ -374,6 +374,10 @@ except Exception as e:
     st.error(f"Ошибка обработки данных: {e}")
     st.stop()
 
+# Сохраняем данные в session_state — чтобы они были доступны на странице экономики
+st.session_state["analysis_df"] = df_analysis.to_dict(orient="records")
+st.session_state["analysis_full"] = analysis
+
 st.success(f"Обработано {len(df)} образцов")
 
 
