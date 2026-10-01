@@ -8,7 +8,8 @@ import plotly.graph_objects as go
 
 from feed_analyzer import (load_feed_data, analyze_feeds,
                             feeds_to_dataframe, dataframe_from_input)
-from ration_calculator import calculate_ration, ration_to_dataframe
+from ration_calculator import (calculate_ration, ration_to_dataframe,
+                                DEFAULT_FEEDS_LIBRARY)
 from api_client import get_ai_recommendation, build_context
 from pdf_report import generate_pdf
 
@@ -104,6 +105,78 @@ with st.sidebar:
     st.header("Параметры коровы")
     live_weight = st.number_input("Живая масса, кг", value=650, step=10)
     milk_yield = st.number_input("Удой, кг/сут", value=35.0, step=0.5)
+
+    st.markdown("---")
+    st.header("🌾 Мои корма")
+    st.caption("Настройте параметры ваших кормов. "
+               "По умолчанию — стандартные справочные значения.")
+
+    feeds_override = {}
+
+    with st.expander("Сено", expanded=False):
+        d = DEFAULT_FEEDS_LIBRARY["сено"]
+        hay_dm = st.number_input("Сухая масса, г/кг",
+                                  300.0, 950.0, float(d["DM"]), 5.0,
+                                  key="my_hay_dm")
+        hay_nel = st.number_input("NEL, МДж/кг СВ",
+                                   3.0, 12.0, float(d["NEL"]), 0.1,
+                                   key="my_hay_nel")
+        hay_nxp = st.number_input("nXP, г/кг СВ",
+                                   50.0, 300.0, float(d["nXP"]), 5.0,
+                                   key="my_hay_nxp")
+        hay_ndf = st.number_input("НДК, г/кг СВ",
+                                   200.0, 800.0, float(d["NDF"]), 5.0,
+                                   key="my_hay_ndf")
+        feeds_override["сено"] = {
+            "DM": hay_dm, "NEL": hay_nel, "nXP": hay_nxp, "NDF": hay_ndf,
+        }
+
+    with st.expander("Сенаж", expanded=False):
+        d = DEFAULT_FEEDS_LIBRARY["сенаж"]
+        haylage_dm = st.number_input("Сухая масса, г/кг",
+                                      300.0, 700.0, float(d["DM"]), 5.0,
+                                      key="my_haylage_dm")
+        haylage_nel = st.number_input("NEL, МДж/кг СВ",
+                                       3.0, 12.0, float(d["NEL"]), 0.1,
+                                       key="my_haylage_nel")
+        haylage_nxp = st.number_input("nXP, г/кг СВ",
+                                       50.0, 300.0, float(d["nXP"]), 5.0,
+                                       key="my_haylage_nxp")
+        haylage_ndf = st.number_input("НДК, г/кг СВ",
+                                       200.0, 800.0, float(d["NDF"]), 5.0,
+                                       key="my_haylage_ndf")
+        feeds_override["сенаж"] = {
+            "DM": haylage_dm, "NEL": haylage_nel,
+            "nXP": haylage_nxp, "NDF": haylage_ndf,
+        }
+
+    with st.expander("Комбикорм", expanded=False):
+        d = DEFAULT_FEEDS_LIBRARY["комбикорм"]
+        conc_dm = st.number_input("Сухая масса, г/кг",
+                                   600.0, 950.0, float(d["DM"]), 5.0,
+                                   key="my_conc_dm")
+        conc_nel = st.number_input("NEL, МДж/кг СВ",
+                                    5.0, 12.0, float(d["NEL"]), 0.1,
+                                    key="my_conc_nel")
+        conc_nxp = st.number_input("nXP, г/кг СВ",
+                                    50.0, 300.0, float(d["nXP"]), 5.0,
+                                    key="my_conc_nxp")
+        conc_ndf = st.number_input("НДК, г/кг СВ",
+                                    100.0, 500.0, float(d["NDF"]), 5.0,
+                                    key="my_conc_ndf")
+        feeds_override["комбикорм"] = {
+            "DM": conc_dm, "NEL": conc_nel,
+            "nXP": conc_nxp, "NDF": conc_ndf,
+        }
+
+    if st.button("↩️ Сбросить корма", key="reset_feeds"):
+        for k in ["my_hay_dm", "my_hay_nel", "my_hay_nxp", "my_hay_ndf",
+                  "my_haylage_dm", "my_haylage_nel", "my_haylage_nxp",
+                  "my_haylage_ndf",
+                  "my_conc_dm", "my_conc_nel", "my_conc_nxp", "my_conc_ndf"]:
+            if k in st.session_state:
+                del st.session_state[k]
+        st.rerun()
 
 
 # ================== ВЫБОР РЕЖИМА ==================
@@ -328,15 +401,15 @@ for col, (key, label, field) in zip(cols, metrics):
 
 # ================== РАЦИОНЫ ==================
 st.header("🍽️ Расчёт рационов для всех образцов")
-st.caption("Доля силоса адаптируется под НДК каждого образца: "
-           "чем выше НДК, тем меньше силоса и больше концентратов.")
+st.caption("Доля силоса адаптируется под НДК каждого образца. "
+           "Используются параметры кормов из боковой панели «Мои корма».")
 
 rations = {}
 for s in analysis["ratings"]:
-    r = calculate_ration(s, live_weight, milk_yield)
+    r = calculate_ration(s, live_weight, milk_yield,
+                          feeds_lib=feeds_override)
     rations[s["name"]] = r
 
-# Сводная таблица со структурой рациона
 summary_rows = []
 for name, r in rations.items():
     comp = r["composition"]
@@ -353,14 +426,13 @@ for name, r in rations.items():
         "Δ NEL": round(r["total"]["NEL"] - r["norms"]["NEL"], 1),
         "nXP, г": round(r["total"]["nXP"], 0),
         "Δ nXP": round(r["total"]["nXP"] - r["norms"]["nXP"], 0),
-        "Предупреждений": len(r["warnings"]),
+        "Предупр.": len(r["warnings"]),
     })
 summary_df = pd.DataFrame(summary_rows)
 
 st.subheader("Структура рационов по всем образцам")
 st.dataframe(summary_df, use_container_width=True)
 
-# График структуры рационов
 st.subheader("Структура рационов (визуализация)")
 fig_struct = go.Figure()
 fig_struct.add_trace(go.Bar(name="Силос", x=summary_df["Образец"],
@@ -402,13 +474,12 @@ for i, (name, r) in enumerate(rations.items()):
             st.success("Рацион сбалансирован.")
 
 
-# ================== ✏️ РЕДАКТИРОВАНИЕ РАЦИОНА ==================
+# ================== ✏️ РЕДАКТИРОВАНИЕ ==================
 st.header("✏️ Редактирование рациона")
 st.caption("Выберите образец и меняйте состав — баланс NEL, nXP и НДК "
            "пересчитывается в реальном времени.")
 
 silo_inputs = {s["name"]: s for s in analysis["ratings"]}
-
 sel_name = st.selectbox("Образец для редактирования:",
                           list(rations.keys()), key="edit_select")
 base_r = rations[sel_name]
@@ -444,13 +515,11 @@ edited = calculate_ration(
     live_weight=live_weight,
     milk_yield=milk_yield,
     custom={
-        "silo_dm": silo_dm,
-        "hay_dm": hay_dm,
-        "haylage_dm": haylage_dm,
-        "concentrate_dm": conc_dm,
-        "fat_kg": fat_kg,
-        "soy_dm": soy_dm,
+        "silo_dm": silo_dm, "hay_dm": hay_dm,
+        "haylage_dm": haylage_dm, "concentrate_dm": conc_dm,
+        "fat_kg": fat_kg, "soy_dm": soy_dm,
     },
+    feeds_lib=feeds_override,
 )
 
 e1, e2, e3, e4 = st.columns(4)
@@ -471,7 +540,7 @@ if edited["warnings"]:
 
 
 # ================== AI ==================
-st.header("🩺 Рекомендации ")
+st.header("🩺 Рекомендации зоотехника (ИИ)")
 col_a, col_b = st.columns([1, 4])
 with col_a:
     refresh = st.button("🔄 Обновить")
