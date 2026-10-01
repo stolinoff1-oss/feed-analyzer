@@ -8,16 +8,49 @@ import plotly.graph_objects as go
 
 from feed_analyzer import (load_feed_data, analyze_feeds,
                             feeds_to_dataframe, dataframe_from_input)
-from ration_calculator import (calculate_ration, ration_to_dataframe,
-                                DEFAULT_FEEDS_LIBRARY)
+try:
+    from ration_calculator import (calculate_ration, ration_to_dataframe,
+                                    DEFAULT_FEEDS_LIBRARY)
+except ImportError:
+    from ration_calculator import calculate_ration, ration_to_dataframe
+    DEFAULT_FEEDS_LIBRARY = {
+        "сено":           {"DM": 850, "NEL": 5.8,  "nXP": 130, "NDF": 550,
+                            "starch": 5,   "RNB": -4},
+        "сенаж":          {"DM": 450, "NEL": 6.5,  "nXP": 150, "NDF": 450,
+                            "starch": 20,  "RNB": -6},
+        "комбикорм":      {"DM": 880, "NEL": 8.2,  "nXP": 160, "NDF": 250,
+                            "starch": 250, "RNB": -2},
+        "защищённый жир": {"DM": 990, "NEL": 30.0, "nXP": 0,   "NDF": 0,
+                            "starch": 0,   "RNB": 0},
+        "соевый шрот":    {"DM": 900, "NEL": 8.0,  "nXP": 220, "NDF": 130,
+                            "starch": 30,  "RNB": 3},
+    }
+
 from api_client import get_ai_recommendation, build_context
 from pdf_report import generate_pdf
+from page_economics import render_economics_page
 
 CONTACT_EMAIL = "viktar.hrechka@syngenta.com"
 LOGO_HEIGHT = 75
 LOGO_HEIGHT_CENTER = 110
 
 st.set_page_config(page_title="Анализ кормов", page_icon="🐄", layout="wide")
+
+
+def _safe(d, key, default=0.0):
+    """Безопасный доступ к словарю с дефолтом."""
+    if not isinstance(d, dict):
+        return default
+    v = d.get(key, default)
+    if v is None:
+        return default
+    try:
+        f = float(v)
+        if f != f:
+            return default
+        return f
+    except (TypeError, ValueError):
+        return default
 
 
 def check_password():
@@ -94,13 +127,42 @@ st.markdown(
     "<p style='text-align:center; color:#7F8C8D; font-size:13px; "
     "margin-top:0; margin-bottom:20px;'>"
     "Лабораторный анализ силоса • рекомендации по рациону "
-    "• оценка качества</p>",
+    "• оценка качества • экономика выращивания</p>",
     unsafe_allow_html=True,
 )
 st.markdown("---")
 
 
-# ================== БОКОВАЯ ПАНЕЛЬ ==================
+# ================== ВЫБОР СТРАНИЦЫ ==================
+with st.sidebar:
+    st.header("Страница")
+    page = st.radio(
+        "Переключение:",
+        ["🌽 Анализ кормов", "💰 Экономика выращивания"],
+        key="page_select",
+        label_visibility="collapsed",
+    )
+    st.markdown("---")
+
+
+# ================== СТРАНИЦА «ЭКОНОМИКА ВЫРАЩИВАНИЯ» ==================
+if page == "💰 Экономика выращивания":
+    render_economics_page()
+
+    st.markdown("---")
+    st.markdown(
+        f"<div style='text-align:center; color:#7F8C8D; font-size:12px; "
+        f"padding:10px 0;'>По всем вопросам обращаться: "
+        f"<a href='mailto:{CONTACT_EMAIL}' style='color:#2C7A3E;'>"
+        f"{CONTACT_EMAIL}</a></div>",
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
+
+# ================== СТРАНИЦА «АНАЛИЗ КОРМОВ» ==================
+
+# ---------- Боковая панель ----------
 with st.sidebar:
     st.header("Параметры коровы")
     live_weight = st.number_input("Живая масса, кг", value=650, step=10)
@@ -116,16 +178,16 @@ with st.sidebar:
     with st.expander("Сено", expanded=False):
         d = DEFAULT_FEEDS_LIBRARY["сено"]
         hay_dm = st.number_input("Сухая масса, г/кг",
-                                  300.0, 950.0, float(d["DM"]), 5.0,
+                                  300.0, 950.0, float(d.get("DM", 850)), 5.0,
                                   key="my_hay_dm")
         hay_nel = st.number_input("NEL, МДж/кг СВ",
-                                   3.0, 12.0, float(d["NEL"]), 0.1,
+                                   3.0, 12.0, float(d.get("NEL", 5.8)), 0.1,
                                    key="my_hay_nel")
         hay_nxp = st.number_input("nXP, г/кг СВ",
-                                   50.0, 300.0, float(d["nXP"]), 5.0,
+                                   50.0, 300.0, float(d.get("nXP", 130)), 5.0,
                                    key="my_hay_nxp")
         hay_ndf = st.number_input("НДК, г/кг СВ",
-                                   200.0, 800.0, float(d["NDF"]), 5.0,
+                                   200.0, 800.0, float(d.get("NDF", 550)), 5.0,
                                    key="my_hay_ndf")
         hay_starch = st.number_input("Крахмал, г/кг СВ",
                                       0.0, 200.0,
@@ -143,16 +205,20 @@ with st.sidebar:
     with st.expander("Сенаж", expanded=False):
         d = DEFAULT_FEEDS_LIBRARY["сенаж"]
         haylage_dm = st.number_input("Сухая масса, г/кг",
-                                      300.0, 700.0, float(d["DM"]), 5.0,
+                                      300.0, 700.0,
+                                      float(d.get("DM", 450)), 5.0,
                                       key="my_haylage_dm")
         haylage_nel = st.number_input("NEL, МДж/кг СВ",
-                                       3.0, 12.0, float(d["NEL"]), 0.1,
+                                       3.0, 12.0,
+                                       float(d.get("NEL", 6.5)), 0.1,
                                        key="my_haylage_nel")
         haylage_nxp = st.number_input("nXP, г/кг СВ",
-                                       50.0, 300.0, float(d["nXP"]), 5.0,
+                                       50.0, 300.0,
+                                       float(d.get("nXP", 150)), 5.0,
                                        key="my_haylage_nxp")
         haylage_ndf = st.number_input("НДК, г/кг СВ",
-                                       200.0, 800.0, float(d["NDF"]), 5.0,
+                                       200.0, 800.0,
+                                       float(d.get("NDF", 450)), 5.0,
                                        key="my_haylage_ndf")
         haylage_starch = st.number_input("Крахмал, г/кг СВ",
                                           0.0, 300.0,
@@ -171,16 +237,20 @@ with st.sidebar:
     with st.expander("Комбикорм", expanded=False):
         d = DEFAULT_FEEDS_LIBRARY["комбикорм"]
         conc_dm = st.number_input("Сухая масса, г/кг",
-                                   600.0, 950.0, float(d["DM"]), 5.0,
+                                   600.0, 950.0,
+                                   float(d.get("DM", 880)), 5.0,
                                    key="my_conc_dm")
         conc_nel = st.number_input("NEL, МДж/кг СВ",
-                                    5.0, 12.0, float(d["NEL"]), 0.1,
+                                    5.0, 12.0,
+                                    float(d.get("NEL", 8.2)), 0.1,
                                     key="my_conc_nel")
         conc_nxp = st.number_input("nXP, г/кг СВ",
-                                    50.0, 300.0, float(d["nXP"]), 5.0,
+                                    50.0, 300.0,
+                                    float(d.get("nXP", 160)), 5.0,
                                     key="my_conc_nxp")
         conc_ndf = st.number_input("НДК, г/кг СВ",
-                                    100.0, 500.0, float(d["NDF"]), 5.0,
+                                    100.0, 500.0,
+                                    float(d.get("NDF", 250)), 5.0,
                                     key="my_conc_ndf")
         conc_starch = st.number_input("Крахмал, г/кг СВ",
                                        0.0, 600.0,
@@ -208,7 +278,7 @@ with st.sidebar:
         st.rerun()
 
 
-# ================== ВЫБОР РЕЖИМА ==================
+# ================== ВЫБОР РЕЖИМА ВВОДА ==================
 mode = st.radio(
     "Способ ввода данных:",
     ["📁 Загрузить Excel-файл", "✍️ Ввести данные вручную"],
@@ -441,23 +511,27 @@ for s in analysis["ratings"]:
 
 summary_rows = []
 for name, r in rations.items():
-    comp = r["composition"]
+    comp = r.get("composition", {})
     summary_rows.append({
         "Образец": name,
-        "Силос, % СВ": round(comp["silo_pct"], 1),
-        "Сено, % СВ": round(comp["hay_pct"], 1),
-        "Сенаж, % СВ": round(comp["haylage_pct"], 1),
-        "Комбикорм, % СВ": round(comp["conc_pct"], 1),
-        "Жир, кг": round(comp["fat_kg"], 2),
-        "Шрот, кг СВ": round(comp["soy_dm"], 2),
-        "НДК, % СВ": round(comp["ndf_pct"], 1),
-        "Крахмал, г/кг": round(comp["starch_per_dm"], 0),
-        "RNB, г/кг": round(comp["total_rnb"], 1),
-        "NEL, МДж": round(r["total"]["NEL"], 1),
-        "Δ NEL": round(r["total"]["NEL"] - r["norms"]["NEL"], 1),
-        "nXP, г": round(r["total"]["nXP"], 0),
-        "Δ nXP": round(r["total"]["nXP"] - r["norms"]["nXP"], 0),
-        "Предупр.": len(r["warnings"]),
+        "Силос, % СВ": round(_safe(comp, "silo_pct"), 1),
+        "Сено, % СВ": round(_safe(comp, "hay_pct"), 1),
+        "Сенаж, % СВ": round(_safe(comp, "haylage_pct"), 1),
+        "Комбикорм, % СВ": round(_safe(comp, "conc_pct"), 1),
+        "Жир, кг": round(_safe(comp, "fat_kg"), 2),
+        "Шрот, кг СВ": round(_safe(comp, "soy_dm"), 2),
+        "НДК, % СВ": round(_safe(comp, "ndf_pct"), 1),
+        "Крахмал, г/кг": round(_safe(comp, "starch_per_dm"), 0),
+        "RNB, г/кг": round(_safe(comp, "total_rnb"), 1),
+        "NEL, МДж": round(_safe(r.get("total", {}), "NEL"), 1),
+        "Δ NEL": round(
+            _safe(r.get("total", {}), "NEL")
+            - _safe(r.get("norms", {}), "NEL"), 1),
+        "nXP, г": round(_safe(r.get("total", {}), "nXP"), 0),
+        "Δ nXP": round(
+            _safe(r.get("total", {}), "nXP")
+            - _safe(r.get("norms", {}), "nXP"), 0),
+        "Предупр.": len(r.get("warnings", [])),
     })
 summary_df = pd.DataFrame(summary_rows)
 
@@ -484,30 +558,39 @@ st.plotly_chart(fig_struct, use_container_width=True)
 
 st.subheader("Детализация по образцам")
 for i, (name, r) in enumerate(rations.items()):
-    warn_emoji = "⚠️" if r["warnings"] else "✅"
+    comp = r.get("composition", {})
+    warnings = r.get("warnings", [])
+    warn_emoji = "⚠️" if warnings else "✅"
     with st.expander(f"{i+1}. {name} {warn_emoji}", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("NEL, МДж", f"{r['total']['NEL']:.1f}",
-                  f"{r['total']['NEL'] - r['norms']['NEL']:+.1f}")
-        c2.metric("nXP, г", f"{r['total']['nXP']:.0f}",
-                  f"{r['total']['nXP'] - r['norms']['nXP']:+.0f}")
-        c3.metric("НДК, % СВ", f"{r['composition']['ndf_pct']:.1f}",
-                  f"{r['composition']['ndf_pct'] - 34:+.1f}")
+        c1.metric("NEL, МДж",
+                  f"{_safe(r.get('total', {}), 'NEL'):.1f}",
+                  f"{_safe(r.get('total', {}), 'NEL') - _safe(r.get('norms', {}), 'NEL'):+.1f}")
+        c2.metric("nXP, г",
+                  f"{_safe(r.get('total', {}), 'nXP'):.0f}",
+                  f"{_safe(r.get('total', {}), 'nXP') - _safe(r.get('norms', {}), 'nXP'):+.0f}")
+        c3.metric("НДК, % СВ",
+                  f"{_safe(comp, 'ndf_pct'):.1f}",
+                  f"{_safe(comp, 'ndf_pct') - 34:+.1f}")
         c4.metric("Крахмал, г/кг СВ",
-                  f"{r['composition']['starch_per_dm']:.0f}",
-                  f"{r['composition']['starch_per_dm'] - 250:+.0f}")
+                  f"{_safe(comp, 'starch_per_dm'):.0f}",
+                  f"{_safe(comp, 'starch_per_dm') - 250:+.0f}")
 
         c5, c6 = st.columns(2)
-        c5.metric("СВ, кг", f"{r['total']['dm']:.2f}",
-                  f"{r['total']['dm'] - r['norms']['DM']:+.2f}")
+        c5.metric("СВ, кг",
+                  f"{_safe(r.get('total', {}), 'dm'):.2f}",
+                  f"{_safe(r.get('total', {}), 'dm') - _safe(r.get('norms', {}), 'DM'):+.2f}")
         c6.metric("RNB, г/кг СВ",
-                  f"{r['composition']['total_rnb']:.1f}",
-                  f"{r['composition']['total_rnb']:+.1f}")
+                  f"{_safe(comp, 'total_rnb'):.1f}",
+                  f"{_safe(comp, 'total_rnb'):+.1f}")
 
-        st.dataframe(ration_to_dataframe(r), use_container_width=True)
+        try:
+            st.dataframe(ration_to_dataframe(r), use_container_width=True)
+        except Exception:
+            st.warning("Не удалось построить таблицу рациона.")
 
-        if r["warnings"]:
-            for w in r["warnings"]:
+        if warnings:
+            for w in warnings:
                 st.warning(w)
         else:
             st.success("Рацион сбалансирован.")
@@ -522,7 +605,7 @@ silo_inputs = {s["name"]: s for s in analysis["ratings"]}
 sel_name = st.selectbox("Образец для редактирования:",
                           list(rations.keys()), key="edit_select")
 base_r = rations[sel_name]
-comp = base_r["composition"]
+comp = base_r.get("composition", {})
 prefix = f"edit_{sel_name}_"
 
 col_reset, _ = st.columns([1, 4])
@@ -536,18 +619,24 @@ with col_reset:
 c1, c2 = st.columns(2)
 with c1:
     silo_dm = st.slider("Силос, кг СВ", 0.0, 20.0,
-                        float(comp["silo_dm"]), 0.1, key=prefix + "silo")
+                        float(_safe(comp, "silo_dm")), 0.1,
+                        key=prefix + "silo")
     hay_dm = st.slider("Сено, кг СВ", 0.0, 10.0,
-                       float(comp["hay_dm"]), 0.1, key=prefix + "hay")
+                       float(_safe(comp, "hay_dm")), 0.1,
+                       key=prefix + "hay")
     haylage_dm = st.slider("Сенаж, кг СВ", 0.0, 12.0,
-                           float(comp["haylage_dm"]), 0.1, key=prefix + "haylage")
+                           float(_safe(comp, "haylage_dm")), 0.1,
+                           key=prefix + "haylage")
 with c2:
     conc_dm = st.slider("Комбикорм, кг СВ", 0.0, 15.0,
-                        float(comp["concentrate_dm"]), 0.1, key=prefix + "conc")
+                        float(_safe(comp, "concentrate_dm")), 0.1,
+                        key=prefix + "conc")
     fat_kg = st.slider("Защищённый жир, кг", 0.0, 3.0,
-                       float(comp["fat_kg"]), 0.05, key=prefix + "fat")
+                       float(_safe(comp, "fat_kg")), 0.05,
+                       key=prefix + "fat")
     soy_dm = st.slider("Соевый шрот, кг СВ", 0.0, 3.0,
-                       float(comp["soy_dm"]), 0.05, key=prefix + "soy")
+                       float(_safe(comp, "soy_dm")), 0.05,
+                       key=prefix + "soy")
 
 edited = calculate_ration(
     silo=silo_inputs[sel_name],
@@ -561,29 +650,36 @@ edited = calculate_ration(
     feeds_lib=feeds_override,
 )
 
+ecomp = edited.get("composition", {})
 e1, e2, e3, e4 = st.columns(4)
-e1.metric("NEL, МДж", f"{edited['total']['NEL']:.1f}",
-          f"{edited['total']['NEL'] - edited['norms']['NEL']:+.1f}")
-e2.metric("nXP, г", f"{edited['total']['nXP']:.0f}",
-          f"{edited['total']['nXP'] - edited['norms']['nXP']:+.0f}")
-e3.metric("СВ, кг", f"{edited['total']['dm']:.2f}",
-          f"{edited['total']['dm'] - edited['norms']['DM']:+.2f}")
-e4.metric("НДК, % СВ", f"{edited['composition']['ndf_pct']:.1f}",
-          f"{edited['composition']['ndf_pct'] - 34:+.1f}")
+e1.metric("NEL, МДж",
+          f"{_safe(edited.get('total', {}), 'NEL'):.1f}",
+          f"{_safe(edited.get('total', {}), 'NEL') - _safe(edited.get('norms', {}), 'NEL'):+.1f}")
+e2.metric("nXP, г",
+          f"{_safe(edited.get('total', {}), 'nXP'):.0f}",
+          f"{_safe(edited.get('total', {}), 'nXP') - _safe(edited.get('norms', {}), 'nXP'):+.0f}")
+e3.metric("СВ, кг",
+          f"{_safe(edited.get('total', {}), 'dm'):.2f}",
+          f"{_safe(edited.get('total', {}), 'dm') - _safe(edited.get('norms', {}), 'DM'):+.2f}")
+e4.metric("НДК, % СВ",
+          f"{_safe(ecomp, 'ndf_pct'):.1f}",
+          f"{_safe(ecomp, 'ndf_pct') - 34:+.1f}")
 
 e5, e6 = st.columns(2)
 e5.metric("Крахмал, г/кг СВ",
-          f"{edited['composition']['starch_per_dm']:.0f}",
-          f"{edited['composition']['starch_per_dm'] - 250:+.0f}")
+          f"{_safe(ecomp, 'starch_per_dm'):.0f}",
+          f"{_safe(ecomp, 'starch_per_dm') - 250:+.0f}")
 e6.metric("RNB, г/кг СВ",
-          f"{edited['composition']['total_rnb']:.1f}",
-          f"{edited['composition']['total_rnb']:+.1f}")
+          f"{_safe(ecomp, 'total_rnb'):.1f}",
+          f"{_safe(ecomp, 'total_rnb'):+.1f}")
 
-st.dataframe(ration_to_dataframe(edited), use_container_width=True)
+try:
+    st.dataframe(ration_to_dataframe(edited), use_container_width=True)
+except Exception:
+    st.warning("Не удалось построить таблицу отредактированного рациона.")
 
-if edited["warnings"]:
-    for w in edited["warnings"]:
-        st.warning(w)
+for w in edited.get("warnings", []):
+    st.warning(w)
 
 
 # ================== AI ==================
