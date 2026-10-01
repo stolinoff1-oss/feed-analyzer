@@ -160,3 +160,159 @@ def get_ai_recommendation(context: str, force_refresh: bool = False) -> str:
         st.cache_data.clear()
     key = _make_cache_key(context)
     return _call_api(key, context)
+
+
+
+# ================== ЭКОНОМИЧЕСКИЙ AI ==================
+
+ECON_SYSTEM_PROMPT = """Ты — экономист-агроном, специалист по выращиванию кукурузы на силос.
+Ты получаешь:
+- параметры двух гибридов (Сингента vs конкурент): урожайность, затраты, качество
+- результаты лабораторного анализа силоса (если есть)
+- расчёт экономии от выбора лучшего гибрида
+
+Твоя задача — дать краткий, конкретный, практичный вывод СТРОГО в таком виде:
+
+## 1. Краткий вывод
+Одно предложение: какой гибрид выгоднее и на сколько рублей.
+
+## 2. Экономический расчёт
+- Экономия затрат: X руб (за счёт меньшей площади).
+- Экономия на зерне: Y руб (за счёт разницы ОЭ).
+- Общая экономия: Z руб.
+- На гектар: W руб/га.
+
+## 3. Что даёт Сингента (или конкурент — если он выигрывает)
+3–4 конкретных пункта с цифрами из расчёта.
+
+## 4. Риски и оговорки
+2–3 пункта: что может изменить вывод (цена зерна, урожайность, погода).
+Будь честен: если разница незначительная — скажи прямо.
+
+## 5. Рекомендация
+Одна фраза: сеять X / не сеять / требуется уточнить.
+
+КРИТИЧЕСКИ ВАЖНО:
+- Только русскими буквами.
+- Конкретные цифры из расчёта.
+- Если данных мало — скажи, чего не хватает.
+- Не выдумывай цифры.
+"""
+
+
+def build_economics_context(econ_result: dict,
+                             silenta_name: str,
+                             competitor_name: str,
+                             silenta_extra: dict = None,
+                             competitor_extra: dict = None) -> str:
+    """Формирует контекст для AI по экономике."""
+    s = econ_result["silenta"]
+    c = econ_result["competitor"]
+
+    lines = [
+        "=== СРАВНЕНИЕ ДВУХ ГИБРИДОВ КУКУРУЗЫ НА СИЛОС ===",
+        "",
+        f"--- {silenta_name} (Гибрид Сингента) ---",
+        f"Урожайность ЗМ: {s['yield_green']} ц/га",
+        f"Содержание СВ: {s['dm_pct']} %",
+        f"Урожайность СВ: {s['dm_yield']:.1f} ц/га",
+        f"Площадь сева: {s['area']:.1f} га",
+        f"Затраты на всю площадь: {s['total_cost']:,.0f} руб".replace(",", " "),
+        f"Выход ОЭ: {s['me_per_ha']:,.0f} МДж/га".replace(",", " "),
+        f"ОЭ: {s['me']} МДж/кг СВ",
+    ]
+    if silenta_extra:
+        lines.append(f"Лабораторный анализ (из силоса):")
+        lines.append(f"  крахмал={silenta_extra.get('starch')} г/кг СВ, "
+                     f"НДК={silenta_extra.get('NDF')} г/кг СВ, "
+                     f"СП={silenta_extra.get('CP')} г/кг СВ, "
+                     f"перев. ОВ={silenta_extra.get('dOM')}%")
+
+    lines.extend([
+        "",
+        f"--- {competitor_name} (Гибрид конкурента) ---",
+        f"Урожайность ЗМ: {c['yield_green']} ц/га",
+        f"Содержание СВ: {c['dm_pct']} %",
+        f"Урожайность СВ: {c['dm_yield']:.1f} ц/га",
+        f"Площадь сева: {c['area']:.1f} га",
+        f"Затраты на всю площадь: {c['total_cost']:,.0f} руб".replace(",", " "),
+        f"Выход ОЭ: {c['me_per_ha']:,.0f} МДж/га".replace(",", " "),
+        f"ОЭ: {c['me']} МДж/кг СВ",
+    ])
+    if competitor_extra:
+        lines.append(f"Лабораторный анализ (из силоса):")
+        lines.append(f"  крахмал={competitor_extra.get('starch')} г/кг СВ, "
+                     f"НДК={competitor_extra.get('NDF')} г/кг СВ, "
+                     f"СП={competitor_extra.get('CP')} г/кг СВ, "
+                     f"перев. ОВ={competitor_extra.get('dOM')}%")
+
+    lines.extend([
+        "",
+        "=== ЭКОНОМИЧЕСКИЙ РАСЧЁТ ===",
+        f"Освобождено площади: {econ_result['freed_area']:.1f} га",
+        f"Экономия затрат на выращивание: "
+        f"{econ_result['saving_field']:,.0f} руб".replace(",", " "),
+        f"Разница выхода ОЭ: "
+        f"{econ_result['delta_me_per_ha']:,.0f} МДж/га".replace(",", " "),
+        f"Эквивалент кукурузного зерна: "
+        f"{econ_result['grain_equiv_per_ha']:,.0f} кг/га".replace(",", " "),
+        f"Цена зерна: {econ_result['grain_price']:,.0f} руб/т".replace(",", " "),
+        f"Экономия на зерне: "
+        f"{econ_result['saving_grain']:,.0f} руб".replace(",", " "),
+        f"ОБЩАЯ ЭКОНОМИЯ: "
+        f"{econ_result['total_saving']:,.0f} руб".replace(",", " "),
+        f"Экономия на гектар: "
+        f"{econ_result['total_saving_per_ha']:,.0f} руб/га".replace(",", " "),
+        "",
+        "Выдай отчёт СТРОГО по структуре из системного промпта. "
+        "Опирайся на конкретные цифры. Если данные из лабораторного "
+        "анализа противоречат экономическим — укажи это."
+    ])
+    return "\n".join(lines)
+
+
+def get_economics_ai_recommendation(context: str,
+                                      force_refresh: bool = False) -> str:
+    """AI-вывод по экономике. Использует тот же ключ AIAI.BY."""
+    if force_refresh:
+        st.cache_data.clear()
+    key = _make_cache_key("econ_" + context)
+    return _call_api_with_prompt(key, context, ECON_SYSTEM_PROMPT)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _call_api_with_prompt(context_hash: str, context: str,
+                            system_prompt: str) -> str:
+    """Универсальный вызов с произвольным системным промптом."""
+    api_key = st.secrets.get("AIAI_API_KEY", "")
+    if not api_key or not api_key.startswith("sk-"):
+        return ("⚠️ API-ключ AIAI.BY не задан в Secrets.\n\n"
+                "Откройте Manage app → ⋮ → Settings → Secrets и добавьте "
+                'строку: AIAI_API_KEY = "sk-vedai-ваш-ключ"')
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": AIAI_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": context},
+        ],
+        "temperature": 0.3,
+    }
+    try:
+        r = requests.post(AIAI_API_URL, headers=headers, json=payload,
+                          timeout=180)
+        if r.status_code == 401:
+            return "❌ Ошибка 401: Неверный ключ AIAI.BY."
+        if r.status_code == 402:
+            return "❌ Ошибка 402: Закончился баланс AIAI.BY."
+        if r.status_code >= 400:
+            return f"❌ Ошибка {r.status_code}: {r.text[:500]}"
+        return r.json()["choices"][0]["message"]["content"]
+    except requests.exceptions.Timeout:
+        return "⏱️ Таймаут: сервер не ответил за 3 минуты."
+    except Exception as e:
+        return f"❌ Ошибка: {e}"
