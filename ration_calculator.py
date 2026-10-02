@@ -9,20 +9,18 @@ NORMS = {
 }
 
 
-# === СТАНДАРТНАЯ БИБЛИОТЕКА КОРМОВ ===
-# DM — сухая масса г/кг; NEL — МДж/кг СВ; nXP — г/кг СВ;
-# NDF — г/кг СВ; starch — крахмал г/кг СВ; RNB — г/кг СВ
+# === СТАНДАРТНАЯ БИБЛИОТЕКА КОРМОВ (можно переопределить через sidebar) ===
 DEFAULT_FEEDS_LIBRARY = {
     "сено":           {"DM": 850, "NEL": 5.8,  "nXP": 130, "NDF": 550,
-                        "starch": 5,   "RNB": -4},
+                        "starch": 5,   "RNB": -4,  "CP": 100},
     "сенаж":          {"DM": 450, "NEL": 6.5,  "nXP": 150, "NDF": 450,
-                        "starch": 20,  "RNB": -6},
+                        "starch": 20,  "RNB": -6,  "CP": 120},
     "комбикорм":      {"DM": 880, "NEL": 8.2,  "nXP": 160, "NDF": 250,
-                        "starch": 250, "RNB": -2},
+                        "starch": 250, "RNB": -2,  "CP": 150},
     "защищённый жир": {"DM": 990, "NEL": 30.0, "nXP": 0,   "NDF": 0,
-                        "starch": 0,   "RNB": 0},
+                        "starch": 0,   "RNB": 0,   "CP": 0},
     "соевый шрот":    {"DM": 900, "NEL": 8.0,  "nXP": 220, "NDF": 130,
-                        "starch": 30,  "RNB": 3},
+                        "starch": 30,  "RNB": 3,   "CP": 450},
 }
 
 FEEDS_LIBRARY = DEFAULT_FEEDS_LIBRARY
@@ -36,7 +34,7 @@ CONC_MAX_PCT = 0.45
 NDF_TARGET = 0.34
 FAT_MAX_KG = 1.5
 SOY_MAX_KG = 1.0
-STARCH_MAX_PER_KG_DM = 250  # г/кг СВ — риск ацидоза
+STARCH_MAX_PER_KG_DM = 250
 
 
 def _f(x, default=0.0):
@@ -85,26 +83,23 @@ def _calc_adaptive(silo: dict, live_weight: float, milk_yield: float,
     silo_NEL = _f(silo.get("NEL_VC") or silo.get("NEL"), 7.0)
     silo_nXP = _f(silo.get("nXP"), 135.0)
     silo_NDF = _f(silo.get("NDF"), 350.0)
-    silo_NDF_kg = silo_NDF / 1000.0
+    silo_ndf_kg = silo_NDF / 1000.0
     silo_starch = _f(silo.get("starch"), 350.0)
     silo_RNB = _f(silo.get("RNB"), -10.0)
 
-    # 1. Структурные корма
     hay_dm     = total_dm * HAY_PCT
     haylage_dm = total_dm * HAYLAGE_PCT
 
     ndf_hay_kg     = hay_dm     * feeds_lib["сено"]["NDF"]  / 1000.0
     ndf_haylage_kg = haylage_dm * feeds_lib["сенаж"]["NDF"] / 1000.0
 
-    # 2. Бюджет НДК
     ndf_max = total_dm * NDF_TARGET
     ndf_avail = ndf_max - ndf_hay_kg - ndf_haylage_kg
     remaining_dm = total_dm - hay_dm - haylage_dm
 
-    # 3. Силос
     conc_ndf_kg = feeds_lib["комбикорм"]["NDF"] / 1000.0
-    if silo_NDF_kg > conc_ndf_kg:
-        denom = silo_NDF_kg - conc_ndf_kg
+    if silo_ndf_kg > conc_ndf_kg:
+        denom = silo_ndf_kg - conc_ndf_kg
         s_max = (ndf_avail - remaining_dm * conc_ndf_kg) / denom
     else:
         s_max = remaining_dm
@@ -121,7 +116,6 @@ def _calc_adaptive(silo: dict, live_weight: float, milk_yield: float,
         hay_dm += (conc_dm - max_conc)
         conc_dm = max_conc
 
-    # 5. Энергия/протеин
     nel_silo    = silo_dm    * silo_NEL
     nel_hay     = hay_dm     * feeds_lib["сено"]["NEL"]
     nel_haylage = haylage_dm * feeds_lib["сенаж"]["NEL"]
@@ -132,12 +126,11 @@ def _calc_adaptive(silo: dict, live_weight: float, milk_yield: float,
     nxp_haylage = haylage_dm * feeds_lib["сенаж"]["nXP"]
     nxp_conc    = conc_dm    * feeds_lib["комбикорм"]["nXP"]
 
-    ndf_silo_val    = silo_dm    * silo_NDF_kg
+    ndf_silo_val    = silo_dm    * silo_ndf_kg
     ndf_hay_val     = hay_dm     * feeds_lib["сено"]["NDF"]    / 1000.0
     ndf_haylage_val = haylage_dm * feeds_lib["сенаж"]["NDF"]   / 1000.0
     ndf_conc_val    = conc_dm    * conc_ndf_kg
 
-    # 6. Жир
     fat_kg = 0.0
     nel_total = nel_silo + nel_hay + nel_haylage + nel_conc
     deficit_nel = norms["NEL"] - nel_total
@@ -152,7 +145,6 @@ def _calc_adaptive(silo: dict, live_weight: float, milk_yield: float,
             nxp_conc    -= fat_kg * feeds_lib["комбикорм"]["nXP"]
             ndf_conc_val -= fat_kg * conc_ndf_kg
 
-    # 7. Шрот
     soy_dm = 0.0
     nxp_total = nxp_silo + nxp_hay + nxp_haylage + nxp_conc
     deficit_nxp = norms["nXP"] - nxp_total
@@ -167,7 +159,6 @@ def _calc_adaptive(silo: dict, live_weight: float, milk_yield: float,
             nel_conc    -= soy_dm * feeds_lib["комбикорм"]["NEL"]
             ndf_conc_val -= soy_dm * conc_ndf_kg
 
-    # 8. Натуральные веса
     silo_nat = silo_dm / (silo_DM / 1000.0) if silo_DM else 0
     hay_nat  = hay_dm / (feeds_lib["сено"]["DM"] / 1000.0)
     haylage_nat = haylage_dm / (feeds_lib["сенаж"]["DM"] / 1000.0)
@@ -187,7 +178,6 @@ def _calc_adaptive(silo: dict, live_weight: float, milk_yield: float,
                        + fat_kg * feeds_lib["защищённый жир"]["DM"] / 1000.0
                        + soy_dm)
 
-    # --- Крахмал ---
     starch_silo = silo_dm * silo_starch / 1000.0
     starch_hay  = hay_dm * feeds_lib["сено"]["starch"] / 1000.0
     starch_haylage = haylage_dm * feeds_lib["сенаж"]["starch"] / 1000.0
@@ -198,7 +188,6 @@ def _calc_adaptive(silo: dict, live_weight: float, milk_yield: float,
     total_starch_per_dm = (1000 * total_starch_kg / total_dm_actual
                            if total_dm_actual else 0)
 
-    # --- RNB ---
     rnb_silo = silo_dm * silo_RNB
     rnb_hay  = hay_dm * feeds_lib["сено"]["RNB"]
     rnb_haylage = haylage_dm * feeds_lib["сенаж"]["RNB"]
@@ -237,7 +226,6 @@ def _calc_adaptive(silo: dict, live_weight: float, milk_yield: float,
             "starch": starch_soy, "RNB": rnb_soy,
         }
 
-    # 9. Предупреждения
     warnings = []
     if total_nel < norms["NEL"] * 0.95:
         warnings.append(
@@ -257,18 +245,16 @@ def _calc_adaptive(silo: dict, live_weight: float, milk_yield: float,
         )
     if total_starch_per_dm > STARCH_MAX_PER_KG_DM:
         warnings.append(
-            f"⚠️ Крахмал = {total_starch_per_dm:.0f} г/кг СВ (норма ≤{STARCH_MAX_PER_KG_DM}). "
-            "Риск ацидоза — добавьте буферы (сода 150–200 г/сут)."
+            f"⚠️ Крахмал = {total_starch_per_dm:.0f} г/кг СВ "
+            f"(норма ≤{STARCH_MAX_PER_KG_DM})."
         )
     if total_rnb < -5:
         warnings.append(
-            f"⚠️ RNB = {total_rnb:.1f} г/кг СВ (норма −5…+5). "
-            "Дефицит азота — увеличьте долю шрота или жмыха."
+            f"⚠️ RNB = {total_rnb:.1f} г/кг СВ (норма −5…+5). Дефицит азота."
         )
     if total_rnb > 5:
         warnings.append(
-            f"⚠️ RNB = {total_rnb:.1f} г/кг СВ (норма −5…+5). "
-            "Избыток азота — потери с мочой."
+            f"⚠️ RNB = {total_rnb:.1f} г/кг СВ (норма −5…+5). Избыток азота."
         )
 
     composition = {
