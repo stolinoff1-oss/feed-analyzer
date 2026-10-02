@@ -17,7 +17,7 @@ def _f(x, default=0.0):
         return default
 
 
-# ================== РАСЧЁТ ОДНОГО ГИБРИДА (ВЫРАЩИВАНИЕ) ==================
+# ================== РАСЧЁТ ОДНОГО ГИБРИДА ==================
 
 def _calc_one(p: dict) -> dict:
     silo_demand  = _f(p.get("silo_demand"), 0)
@@ -49,31 +49,65 @@ def _calc_one(p: dict) -> dict:
     }
 
 
-def calculate_economics(silenta: dict, competitor: dict) -> dict:
+# ================== СРАВНЕНИЕ ГИБРИДОВ ==================
+
+def calculate_economics(silenta: dict, competitor: dict,
+                         scenario: str = "demand",
+                         fixed_area_ha: float = None) -> dict:
+    """
+    scenario:
+        "area"   — фиксированная площадь. Считаем экономию затрат и излишек.
+        "demand" — фиксированная потребность. Считаем только экономию затрат.
+    fixed_area_ha — площадь для сценария "area".
+                    Если None — используем площадь конкурента.
+    """
     s = _calc_one(silenta)
     c = _calc_one(competitor)
 
-    saving_field = c["total_cost"] - s["total_cost"]
-    freed_area = c["area"] - s["area"]
-    delta_me = s["me_per_ha"] - c["me_per_ha"]
-    grain_equiv = delta_me / GRAIN_ME if GRAIN_ME else 0
-    grain_price = _f(silenta.get("grain_price"), 10_000)
-    saving_grain = grain_equiv * grain_price / 1000 * c["area"]
-    total_saving = saving_field + saving_grain
-    total_saving_per_ha = total_saving / c["area"] if c["area"] else 0
+    if scenario == "area":
+        same_area = fixed_area_ha if fixed_area_ha else c["area"]
 
-    return {
-        "silenta": s,
-        "competitor": c,
-        "saving_field": saving_field,
-        "freed_area": freed_area,
-        "delta_me_per_ha": delta_me,
-        "grain_equiv_per_ha": grain_equiv,
-        "grain_price": grain_price,
-        "saving_grain": saving_grain,
-        "total_saving": total_saving,
-        "total_saving_per_ha": total_saving_per_ha,
-    }
+        cost_silenta = (s["seed_cost_per_ha"] + s["field_cost"]) * same_area
+        cost_competitor = (c["seed_cost_per_ha"] + c["field_cost"]) * same_area
+        saving_field = cost_competitor - cost_silenta
+
+        # Излишек силоса у Силенты
+        dm_silenta_c   = s["dm_yield"] * same_area
+        dm_competitor_c = c["dm_yield"] * same_area
+        dm_surplus_t = (dm_silenta_c - dm_competitor_c) / 10
+
+        dm_pct = s["dm_pct"] / 100
+        gm_surplus_t = dm_surplus_t / dm_pct if dm_pct > 0 else 0
+
+        me_surplus_mj = dm_surplus_t * 1000 * s["me"]
+        grain_equiv_t = me_surplus_mj / GRAIN_ME / 1000
+
+        return {
+            "scenario": "area",
+            "silenta": s,
+            "competitor": c,
+            "same_area": same_area,
+            "saving_field": saving_field,
+            "cost_silenta": cost_silenta,
+            "cost_competitor": cost_competitor,
+            "surplus_dm_t": dm_surplus_t,
+            "surplus_gm_t": gm_surplus_t,
+            "surplus_me_mj": me_surplus_mj,
+            "surplus_grain_t": grain_equiv_t,
+        }
+    else:  # "demand"
+        saving_field = c["total_cost"] - s["total_cost"]
+        freed_area = c["area"] - s["area"]
+
+        return {
+            "scenario": "demand",
+            "silenta": s,
+            "competitor": c,
+            "saving_field": saving_field,
+            "freed_area": freed_area,
+            "silenta_area": s["area"],
+            "competitor_area": c["area"],
+        }
 
 
 # ================== ЭКОНОМИЯ НА КОРМАХ ==================
@@ -88,7 +122,6 @@ def calc_feed_economics(silenta_params: dict,
                          hay_price_per_t: float = 0.0,
                          haylage_price_per_t: float = 0.0,
                          feeds_lib: dict = None) -> dict:
-    """Считает экономию на кормах за счёт качества силоса."""
     from ration_calculator import calculate_ration
 
     r1 = calculate_ration(silenta_params, live_weight, milk_yield,
@@ -113,15 +146,10 @@ def calc_feed_economics(silenta_params: dict,
     delta_hay_nat     = hay2_nat - hay1_nat
     delta_haylage_nat = haylage2_nat - haylage1_nat
 
-    conc_price_kg    = conc_price_per_t / 1000
-    silo_price_kg    = silo_price_per_t / 1000
-    hay_price_kg     = hay_price_per_t / 1000
-    haylage_price_kg = haylage_price_per_t / 1000
-
-    saving_silo_cow_day    = delta_silo_nat * silo_price_kg
-    saving_conc_cow_day    = delta_conc_nat * conc_price_kg
-    saving_hay_cow_day     = delta_hay_nat * hay_price_kg
-    saving_haylage_cow_day = delta_haylage_nat * haylage_price_kg
+    saving_silo_cow_day    = delta_silo_nat * silo_price_per_t / 1000
+    saving_conc_cow_day    = delta_conc_nat * conc_price_per_t / 1000
+    saving_hay_cow_day     = delta_hay_nat * hay_price_per_t / 1000
+    saving_haylage_cow_day = delta_haylage_nat * haylage_price_per_t / 1000
 
     saving_silo_day    = saving_silo_cow_day * n_cows
     saving_conc_day    = saving_conc_cow_day * n_cows
@@ -158,40 +186,4 @@ def calc_feed_economics(silenta_params: dict,
         "total_feed_day": total_feed_day,
         "total_feed_year": total_feed_year,
         "n_cows": n_cows,
-    }
-
-
-# ================== ИЗЛИШЕК СИЛОСА ==================
-
-def calc_silo_surplus(silenta_result: dict,
-                       competitor_result: dict,
-                       silo_price_per_t: float,
-                       grain_price: float) -> dict:
-    """Считает излишек силоса при одинаковой площади."""
-    same_area = competitor_result["area"]
-
-    dm_silenta_c = silenta_result["dm_yield"] * same_area
-    dm_competitor_c = competitor_result["dm_yield"] * same_area
-
-    surplus_dm_c = dm_silenta_c - dm_competitor_c
-    surplus_dm_t = surplus_dm_c / 10.0
-
-    dm_pct = silenta_result["dm_pct"] / 100.0
-    surplus_gm_t = surplus_dm_t / dm_pct if dm_pct > 0 else 0
-
-    saving_sale = surplus_gm_t * silo_price_per_t
-
-    me = silenta_result["me"]
-    surplus_me_mj = surplus_dm_t * 1000.0 * me
-    grain_kg = surplus_me_mj / GRAIN_ME
-    saving_grain_equiv = grain_kg / 1000.0 * grain_price
-
-    return {
-        "same_area": same_area,
-        "surplus_dm_t": surplus_dm_t,
-        "surplus_gm_t": surplus_gm_t,
-        "surplus_me_mj": surplus_me_mj,
-        "surplus_grain_t": grain_kg / 1000.0,
-        "saving_sale": saving_sale,
-        "saving_grain_equiv": saving_grain_equiv,
     }
