@@ -15,15 +15,15 @@ except ImportError:
     from ration_calculator import calculate_ration, ration_to_dataframe
     DEFAULT_FEEDS_LIBRARY = {
         "сено":           {"DM": 850, "NEL": 5.8,  "nXP": 130, "NDF": 550,
-                            "starch": 5,   "RNB": -4},
+                            "starch": 5,   "RNB": -4,  "CP": 100},
         "сенаж":          {"DM": 450, "NEL": 6.5,  "nXP": 150, "NDF": 450,
-                            "starch": 20,  "RNB": -6},
+                            "starch": 20,  "RNB": -6,  "CP": 120},
         "комбикорм":      {"DM": 880, "NEL": 8.2,  "nXP": 160, "NDF": 250,
-                            "starch": 250, "RNB": -2},
+                            "starch": 250, "RNB": -2,  "CP": 150},
         "защищённый жир": {"DM": 990, "NEL": 30.0, "nXP": 0,   "NDF": 0,
-                            "starch": 0,   "RNB": 0},
+                            "starch": 0,   "RNB": 0,   "CP": 0},
         "соевый шрот":    {"DM": 900, "NEL": 8.0,  "nXP": 220, "NDF": 130,
-                            "starch": 30,  "RNB": 3},
+                            "starch": 30,  "RNB": 3,   "CP": 450},
     }
 
 from api_client import get_ai_recommendation, build_context
@@ -38,7 +38,6 @@ st.set_page_config(page_title="Анализ кормов", page_icon="🐄", lay
 
 
 def _safe(d, key, default=0.0):
-    """Безопасный доступ к словарю с дефолтом."""
     if not isinstance(d, dict):
         return default
     v = d.get(key, default)
@@ -145,7 +144,7 @@ with st.sidebar:
     st.markdown("---")
 
 
-# ================== СТРАНИЦА «ЭКОНОМИКА ВЫРАЩИВАНИЯ» ==================
+# ================== СТРАНИЦА «ЭКОНОМИКА» ==================
 if page == "💰 Экономика выращивания":
     render_economics_page()
 
@@ -162,7 +161,6 @@ if page == "💰 Экономика выращивания":
 
 # ================== СТРАНИЦА «АНАЛИЗ КОРМОВ» ==================
 
-# ---------- Боковая панель ----------
 with st.sidebar:
     st.header("Параметры коровы")
     live_weight = st.number_input("Живая масса, кг", value=650, step=10)
@@ -197,9 +195,13 @@ with st.sidebar:
                                    -20.0, 20.0,
                                    float(d.get("RNB", -4)), 0.5,
                                    key="my_hay_rnb")
+        hay_cp = st.number_input("Сырой протеин (СП), г/кг СВ",
+                                  20.0, 300.0,
+                                  float(d.get("CP", 100)), 5.0,
+                                  key="my_hay_cp")
         feeds_override["сено"] = {
             "DM": hay_dm, "NEL": hay_nel, "nXP": hay_nxp, "NDF": hay_ndf,
-            "starch": hay_starch, "RNB": hay_rnb,
+            "starch": hay_starch, "RNB": hay_rnb, "CP": hay_cp,
         }
 
     with st.expander("Сенаж", expanded=False):
@@ -228,10 +230,15 @@ with st.sidebar:
                                        -20.0, 20.0,
                                        float(d.get("RNB", -6)), 0.5,
                                        key="my_haylage_rnb")
+        haylage_cp = st.number_input("Сырой протеин (СП), г/кг СВ",
+                                      20.0, 300.0,
+                                      float(d.get("CP", 120)), 5.0,
+                                      key="my_haylage_cp")
         feeds_override["сенаж"] = {
             "DM": haylage_dm, "NEL": haylage_nel,
             "nXP": haylage_nxp, "NDF": haylage_ndf,
             "starch": haylage_starch, "RNB": haylage_rnb,
+            "CP": haylage_cp,
         }
 
     with st.expander("Комбикорм", expanded=False):
@@ -260,25 +267,31 @@ with st.sidebar:
                                     -20.0, 20.0,
                                     float(d.get("RNB", -2)), 0.5,
                                     key="my_conc_rnb")
+        conc_cp = st.number_input("Сырой протеин (СП), г/кг СВ",
+                                   20.0, 300.0,
+                                   float(d.get("CP", 150)), 5.0,
+                                   key="my_conc_cp")
         feeds_override["комбикорм"] = {
             "DM": conc_dm, "NEL": conc_nel,
             "nXP": conc_nxp, "NDF": conc_ndf,
             "starch": conc_starch, "RNB": conc_rnb,
+            "CP": conc_cp,
         }
 
     if st.button("↩️ Сбросить корма", key="reset_feeds"):
         for k in ["my_hay_dm", "my_hay_nel", "my_hay_nxp", "my_hay_ndf",
-                  "my_hay_starch", "my_hay_rnb",
+                  "my_hay_starch", "my_hay_rnb", "my_hay_cp",
                   "my_haylage_dm", "my_haylage_nel", "my_haylage_nxp",
                   "my_haylage_ndf", "my_haylage_starch", "my_haylage_rnb",
+                  "my_haylage_cp",
                   "my_conc_dm", "my_conc_nel", "my_conc_nxp", "my_conc_ndf",
-                  "my_conc_starch", "my_conc_rnb"]:
+                  "my_conc_starch", "my_conc_rnb", "my_conc_cp"]:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
 
 
-# ================== ВЫБОР РЕЖИМА ВВОДА ==================
+# ================== ВЫБОР РЕЖИМА ==================
 mode = st.radio(
     "Способ ввода данных:",
     ["📁 Загрузить Excel-файл", "✍️ Ввести данные вручную"],
@@ -374,7 +387,8 @@ except Exception as e:
     st.error(f"Ошибка обработки данных: {e}")
     st.stop()
 
-# Сохраняем данные в session_state — чтобы они были доступны на странице экономики
+# Сохраняем данные в session_state — чтобы они были доступны
+# на странице экономики
 st.session_state["analysis_df"] = df_analysis.to_dict(orient="records")
 st.session_state["analysis_full"] = analysis
 
