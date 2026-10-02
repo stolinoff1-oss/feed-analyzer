@@ -1,8 +1,9 @@
-"""Экономический расчёт выращивания силосной кукурузы + экономия на кормах.
-Все суммы — в одной валюте расчёта. Внутренние формулы в центнерах (1 т = 10 ц).
+"""Экономический расчёт выращивания силосной кукурузы.
+Два сценария: поголовье (нужно прокормить N голов) и площадь (есть M га).
+Все суммы — в валюте расчёта. Внутренние формулы в центнерах (1 т = 10 ц).
 """
 
-GRAIN_ME = 12.835  # МДж/кг ОЭ зерна кукурузы (СВ 85%)
+GRAIN_ME = 12.835
 
 
 def _f(x, default=0.0):
@@ -17,10 +18,20 @@ def _f(x, default=0.0):
         return default
 
 
-# ================== РАСЧЁТ ОДНОГО ГИБРИДА ==================
+def calc_demand_from_herd(n_cows: float, silo_per_cow_kg: float,
+                           days: float) -> float:
+    """Потребность в силосе в т ЗМ.
+    n_cows — голов
+    silo_per_cow_kg — кг ЗМ на 1 голову в сутки
+    days — дней кормления в году
+    """
+    return _f(n_cows) * _f(silo_per_cow_kg) * _f(days) / 1000.0
 
-def _calc_one(p: dict) -> dict:
-    silo_demand  = _f(p.get("silo_demand"), 0)
+
+def _calc_one(p: dict, silo_demand_c: float = 0) -> dict:
+    """Расчёт одного гибрида.
+    silo_demand_c — потребность в силосе, ц ЗМ (0 = не использовать).
+    """
     yield_green  = _f(p.get("yield_green"), 0)
     seeding_rate = _f(p.get("seeding_rate"), 0)
     seed_price   = _f(p.get("seed_price"), 0)
@@ -28,7 +39,7 @@ def _calc_one(p: dict) -> dict:
     dm_pct       = _f(p.get("dm_pct"), 35)
     me           = _f(p.get("me"), 11.0)
 
-    area = silo_demand / yield_green if yield_green > 0 else 0
+    area = silo_demand_c / yield_green if yield_green > 0 and silo_demand_c > 0 else 0
     seed_cost_per_ha = (seed_price / 80) * seeding_rate / 1000
     total_cost = (field_cost + seed_cost_per_ha) * area
     dm_yield = yield_green * dm_pct / 100
@@ -49,35 +60,33 @@ def _calc_one(p: dict) -> dict:
     }
 
 
-# ================== СРАВНЕНИЕ ГИБРИДОВ ==================
-
 def calculate_economics(silenta: dict, competitor: dict,
-                         scenario: str = "demand",
+                         scenario: str,
+                         silo_demand_t: float = None,
                          fixed_area_ha: float = None) -> dict:
     """
     scenario:
-        "area"   — фиксированная площадь. Считаем экономию затрат и излишек.
-        "demand" — фиксированная потребность. Считаем только экономию затрат.
-    fixed_area_ha — площадь для сценария "area".
-                    Если None — используем площадь конкурента.
+        "herd" — потребность известна (т ЗМ), площади разные.
+        "area" — площадь фиксирована, излишек у более урожайного.
+
+    silo_demand_t — потребность в силосе, т ЗМ (для сценария herd)
+    fixed_area_ha — площадь, га (для сценария area)
     """
-    s = _calc_one(silenta)
-    c = _calc_one(competitor)
-
     if scenario == "area":
-        same_area = fixed_area_ha if fixed_area_ha else c["area"]
+        area_val = _f(fixed_area_ha, 0)
+        s = _calc_one(silenta, 0)
+        c = _calc_one(competitor, 0)
 
-        cost_silenta = (s["seed_cost_per_ha"] + s["field_cost"]) * same_area
-        cost_competitor = (c["seed_cost_per_ha"] + c["field_cost"]) * same_area
-        saving_field = cost_competitor - cost_silenta
+        cost_s = (s["seed_cost_per_ha"] + s["field_cost"]) * area_val
+        cost_c = (c["seed_cost_per_ha"] + c["field_cost"]) * area_val
+        saving_field = cost_c - cost_s
 
-        # Излишек силоса у Силенты
-        dm_silenta_c   = s["dm_yield"] * same_area
-        dm_competitor_c = c["dm_yield"] * same_area
-        dm_surplus_t = (dm_silenta_c - dm_competitor_c) / 10
+        dm_s = s["dm_yield"] * area_val
+        dm_c = c["dm_yield"] * area_val
+        dm_surplus_t = (dm_s - dm_c) / 10
 
-        dm_pct = s["dm_pct"] / 100
-        gm_surplus_t = dm_surplus_t / dm_pct if dm_pct > 0 else 0
+        dm_pct_s = s["dm_pct"] / 100
+        gm_surplus_t = dm_surplus_t / dm_pct_s if dm_pct_s > 0 else 0
 
         me_surplus_mj = dm_surplus_t * 1000 * s["me"]
         grain_equiv_t = me_surplus_mj / GRAIN_ME / 1000
@@ -86,23 +95,28 @@ def calculate_economics(silenta: dict, competitor: dict,
             "scenario": "area",
             "silenta": s,
             "competitor": c,
-            "same_area": same_area,
+            "same_area": area_val,
             "saving_field": saving_field,
-            "cost_silenta": cost_silenta,
-            "cost_competitor": cost_competitor,
+            "cost_silenta": cost_s,
+            "cost_competitor": cost_c,
             "surplus_dm_t": dm_surplus_t,
             "surplus_gm_t": gm_surplus_t,
             "surplus_me_mj": me_surplus_mj,
             "surplus_grain_t": grain_equiv_t,
         }
-    else:  # "demand"
+    else:  # herd
+        silo_demand_c = _f(silo_demand_t, 0) * 10
+        s = _calc_one(silenta, silo_demand_c)
+        c = _calc_one(competitor, silo_demand_c)
+
         saving_field = c["total_cost"] - s["total_cost"]
         freed_area = c["area"] - s["area"]
 
         return {
-            "scenario": "demand",
+            "scenario": "herd",
             "silenta": s,
             "competitor": c,
+            "silo_demand_t": _f(silo_demand_t, 0),
             "saving_field": saving_field,
             "freed_area": freed_area,
             "silenta_area": s["area"],
