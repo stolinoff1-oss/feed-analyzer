@@ -39,7 +39,6 @@ Markdown-таблица со столбцами:
 ## 5. Общие выводы
 - Оптимальный, запасной, исключить.
 - Общие рекомендации по рациону.
-- Связь: какой силос даёт меньшую долю концентратов.
 
 КРИТИЧЕСКИ ВАЖНО:
 - Только русскими буквами. НИКАКОЙ транслитерации.
@@ -56,6 +55,7 @@ ECON_SYSTEM_PROMPT = """Ты — экономист-агроном, специа
 - параметры двух гибридов (Сингента vs конкурент): урожайность, затраты, качество
 - результаты лабораторного анализа силоса (если есть)
 - расчёт экономии от выбора лучшего гибрида
+- выбранный сценарий (фиксированная площадь или фиксированная потребность)
 
 Твоя задача — дать краткий, конкретный, практичный вывод СТРОГО в таком виде:
 
@@ -63,18 +63,24 @@ ECON_SYSTEM_PROMPT = """Ты — экономист-агроном, специа
 Одно предложение: какой гибрид выгоднее и на сколько (в валюте расчёта).
 
 ## 2. Экономический расчёт
-- Экономия затрат: X (за счёт меньшей площади).
-- Экономия на зерне: Y (за счёт разницы ОЭ).
-- Общая экономия: Z.
-- На гектар: W.
+Для сценария «фиксированная потребность»:
+- Экономия затрат на выращивание: X.
+- Экономия на кормлении: Y.
+- Итого: Z.
+
+Для сценария «фиксированная площадь»:
+- Экономия затрат: X.
+- Стоимость излишка силоса: Y.
+- Экономия на кормлении: Z.
+- Итого: W.
 
 ## 3. Что даёт Сингента (или конкурент — если он выигрывает)
-3–4 конкретных пункта с цифрами: разница в урожайности СВ, разница в выходе ОЭ,
-разница в площади, разница в затратах.
+3–4 конкретных пункта с цифрами: разница в урожайности СВ, разница в ОЭ,
+разница в площади или излишке, разница в затратах.
 
 ## 4. Ключевые цифры
-Только конкретные показатели из расчёта. Что дало основной вклад в экономию —
-разница в урожайности или в ОЭ. Приведи 2–3 цифры. Без оговорок и предположений.
+Только конкретные показатели из расчёта. Что дало основной вклад в экономию.
+2–3 цифры. Без оговорок и предположений.
 
 ## 5. Рекомендация
 Одна фраза: сеять X / не сеять / данные требуют уточнения.
@@ -101,7 +107,6 @@ def _make_cache_key(context: str) -> str:
 @st.cache_data(ttl=3600, show_spinner=False)
 def _call_api_with_prompt(context_hash: str, context: str,
                             system_prompt: str) -> str:
-    """Универсальный вызов с произвольным системным промптом."""
     api_key = st.secrets.get("AIAI_API_KEY", "")
     if not api_key or not api_key.startswith("sk-"):
         return (
@@ -141,7 +146,6 @@ def _call_api_with_prompt(context_hash: str, context: str,
 
 
 def _call_api(context_hash: str, context: str) -> str:
-    """Вызов зоотехнического AI (обёртка с фиксированным промптом)."""
     return _call_api_with_prompt(context_hash, context, SYSTEM_PROMPT)
 
 
@@ -220,19 +224,24 @@ def build_economics_context(econ_result: dict,
                              competitor_name: str,
                              silenta_extra: dict = None,
                              competitor_extra: dict = None) -> str:
-    """Формирует контекст для AI по экономике."""
+    """Формирует контекст для AI по экономике с учётом выбранного сценария."""
     s = econ_result["silenta"]
     c = econ_result["competitor"]
+    scenario = econ_result.get("scenario", "demand")
+
+    if scenario == "area":
+        scenario_label = "Фиксированная площадь"
+    else:
+        scenario_label = "Фиксированная потребность"
 
     lines = [
         "=== СРАВНЕНИЕ ДВУХ ГИБРИДОВ КУКУРУЗЫ НА СИЛОС ===",
+        f"СЦЕНАРИЙ: {scenario_label}",
         "",
         f"--- {silenta_name} (Гибрид Сингента) ---",
         f"Урожайность ЗМ: {s['yield_green']} ц/га",
         f"Содержание СВ: {s['dm_pct']} %",
         f"Урожайность СВ: {s['dm_yield']:.1f} ц/га",
-        f"Площадь сева: {s['area']:.1f} га",
-        f"Затраты на всю площадь: {s['total_cost']:,.0f}".replace(",", " "),
         f"Выход ОЭ: {s['me_per_ha']:,.0f} МДж/га".replace(",", " "),
         f"ОЭ: {s['me']} МДж/кг СВ",
     ]
@@ -249,8 +258,6 @@ def build_economics_context(econ_result: dict,
         f"Урожайность ЗМ: {c['yield_green']} ц/га",
         f"Содержание СВ: {c['dm_pct']} %",
         f"Урожайность СВ: {c['dm_yield']:.1f} ц/га",
-        f"Площадь сева: {c['area']:.1f} га",
-        f"Затраты на всю площадь: {c['total_cost']:,.0f}".replace(",", " "),
         f"Выход ОЭ: {c['me_per_ha']:,.0f} МДж/га".replace(",", " "),
         f"ОЭ: {c['me']} МДж/кг СВ",
     ])
@@ -261,34 +268,54 @@ def build_economics_context(econ_result: dict,
                      f"СП={competitor_extra.get('CP')} г/кг СВ, "
                      f"перев. ОВ={competitor_extra.get('dOM')}%")
 
-    lines.extend([
-        "",
-        "=== ЭКОНОМИЧЕСКИЙ РАСЧЁТ ===",
-        f"Освобождено площади: {econ_result['freed_area']:.1f} га",
-        f"Экономия затрат на выращивание: "
-        f"{econ_result['saving_field']:,.0f}".replace(",", " "),
-        f"Разница выхода ОЭ: "
-        f"{econ_result['delta_me_per_ha']:,.0f} МДж/га".replace(",", " "),
-        f"Эквивалент кукурузного зерна: "
-        f"{econ_result['grain_equiv_per_ha']:,.0f} кг/га".replace(",", " "),
-        f"Цена зерна: {econ_result['grain_price']:,.0f}".replace(",", " "),
-        f"Экономия на зерне: "
-        f"{econ_result['saving_grain']:,.0f}".replace(",", " "),
-        f"ОБЩАЯ ЭКОНОМИЯ: "
-        f"{econ_result['total_saving']:,.0f}".replace(",", " "),
-        f"Экономия на гектар: "
-        f"{econ_result['total_saving_per_ha']:,.0f}".replace(",", " "),
-        "",
+    lines.append("")
+    lines.append("=== РАСЧЁТ ===")
+
+    if scenario == "area":
+        # Сценарий "площадь"
+        same_area = econ_result.get("same_area", 0)
+        lines.extend([
+            f"Площадь посева: {same_area:.1f} га (одинаковая для обоих)",
+            f"Затраты — {silenta_name}: "
+            f"{econ_result.get('cost_silenta', 0):,.0f}".replace(",", " "),
+            f"Затраты — {competitor_name}: "
+            f"{econ_result.get('cost_competitor', 0):,.0f}".replace(",", " "),
+            f"Экономия затрат: "
+            f"{econ_result.get('saving_field', 0):,.0f}".replace(",", " "),
+            f"Излишек СВ у Сингенты: "
+            f"{econ_result.get('surplus_dm_t', 0):.1f} т СВ",
+            f"Излишек ЗМ: {econ_result.get('surplus_gm_t', 0):.1f} т",
+            f"Эквивалент зерна по ОЭ: "
+            f"{econ_result.get('surplus_grain_t', 0):.1f} т зерна",
+        ])
+    else:
+        # Сценарий "потребность"
+        lines.extend([
+            f"Площадь — {silenta_name}: "
+            f"{econ_result.get('silenta_area', s['area']):.1f} га",
+            f"Площадь — {competitor_name}: "
+            f"{econ_result.get('competitor_area', c['area']):.1f} га",
+            f"Освобождено площади: "
+            f"{econ_result.get('freed_area', 0):.1f} га",
+            f"Затраты — {silenta_name}: "
+            f"{s['total_cost']:,.0f}".replace(",", " "),
+            f"Затраты — {competitor_name}: "
+            f"{c['total_cost']:,.0f}".replace(",", " "),
+            f"Экономия затрат: "
+            f"{econ_result.get('saving_field', 0):,.0f}".replace(",", " "),
+        ])
+
+    lines.append("")
+    lines.append(
         "Выдай отчёт СТРОГО по структуре из системного промпта. "
         "Опирайся на конкретные цифры. Если данные из лабораторного "
         "анализа противоречат экономическим — укажи это."
-    ])
+    )
     return "\n".join(lines)
 
 
 def get_economics_ai_recommendation(context: str,
                                       force_refresh: bool = False) -> str:
-    """AI-вывод по экономике."""
     if force_refresh:
         st.cache_data.clear()
     key = _make_cache_key("econ_" + context)
