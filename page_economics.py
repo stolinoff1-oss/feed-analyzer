@@ -1,11 +1,11 @@
-"""UI для страницы «Экономика выращивания» + экономия на кормах + PDF."""
+"""UI для страницы «Экономика выращивания» + экономия на кормах + PDF.
+Два сценария: «фиксированная площадь» и «фиксированная потребность»."""
 
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from economics import (calculate_economics, calc_feed_economics,
-                        calc_silo_surplus)
+from economics import calculate_economics, calc_feed_economics
 from api_client import (get_economics_ai_recommendation,
                          build_economics_context)
 from pdf_report import generate_economics_pdf
@@ -63,9 +63,32 @@ def _sample_to_silo(p: dict) -> dict:
 
 def render_economics_page():
     st.header("💰 Экономика выращивания силосной кукурузы")
-    st.caption("Сравнение двух гибридов и расчёт экономии — при выращивании "
-               "и при кормлении. Все суммы — в валюте расчёта.")
+    st.caption("Сравнение двух гибридов и расчёт экономии. "
+               "Все суммы — в валюте расчёта.")
 
+    # ================== СЦЕНАРИЙ ==================
+    st.subheader("0. Сценарий использования")
+    scenario = st.radio(
+        "Как вы планируете использовать землю?",
+        [
+            "📦 Мне нужно конкретное количество силоса (потребность)",
+            "🌾 У меня есть фиксированная площадь",
+        ],
+        index=0,
+        horizontal=False,
+    )
+    scenario_key = "demand" if "потребность" in scenario else "area"
+
+    if scenario_key == "area":
+        st.info("🌾 **Сценарий «Фиксированная площадь».** Оба гибрида "
+                "засеиваются на одной площади. Более урожайный даёт "
+                "излишек силоса, который можно продать или скормить.")
+    else:
+        st.info("📦 **Сценарий «Фиксированная потребность».** Нужно "
+                "произвести конкретный объём силоса. Считаем, какой "
+                "гибрид дешевле для этой цели.")
+
+    # ================== ДАННЫЕ ИЗ АНАЛИЗА ==================
     analysis_records = st.session_state.get("analysis_df", [])
     has_analysis = bool(analysis_records)
 
@@ -75,8 +98,6 @@ def render_economics_page():
             f"🔬 Использовать данные из анализа кормов "
             f"(загружено {len(analysis_records)} образцов)",
             value=False,
-            help="При включении можно выбрать образец — СВ%, ОЭ, крахмал, "
-                 "НДК, nXP подтянутся автоматически.",
         )
     else:
         st.info("💡 Данные анализа кормов не загружены. "
@@ -87,7 +108,7 @@ def render_economics_page():
                                             for r in analysis_records]
 
     # ================== ОБЩИЕ ПАРАМЕТРЫ ==================
-    st.subheader("1. Общие параметры (выращивание)")
+    st.subheader("1. Общие параметры")
     c1, c2 = st.columns(2)
     with c1:
         silo_demand_t = st.number_input(
@@ -102,7 +123,7 @@ def render_economics_page():
     silo_demand_c = silo_demand_t * 10
 
     # ================== ДВА ГИБРИДА ==================
-    st.subheader("2. Параметры гибридов (силосов)")
+    st.subheader("2. Параметры гибридов")
     col1, col2 = st.columns(2)
 
     silenta_extra = None
@@ -146,7 +167,6 @@ def render_economics_page():
             m1, m2 = st.columns(2)
             m1.metric("СВ, %", f"{s_dm:.1f}")
             m2.metric("ОЭ, МДж/кг СВ", f"{s_me:.2f}")
-            st.caption("🔒 Значения подтянуты из анализа.")
         else:
             s_dm = st.number_input("Содержание СВ, %",
                                      value=34.0, step=0.5, format="%.1f",
@@ -193,7 +213,6 @@ def render_economics_page():
             m1, m2 = st.columns(2)
             m1.metric("СВ, %", f"{c_dm:.1f}")
             m2.metric("ОЭ, МДж/кг СВ", f"{c_me:.2f}")
-            st.caption("🔒 Значения подтянуты из анализа.")
         else:
             c_dm = st.number_input("Содержание СВ, %",
                                      value=30.0, step=0.5, format="%.1f",
@@ -201,6 +220,19 @@ def render_economics_page():
             c_me = st.number_input("ОЭ, МДж/кг СВ",
                                      value=10.4, step=0.1, format="%.2f",
                                      key="econ_c_me")
+
+    # Площадь для сценария "area"
+    fixed_area_ha = None
+    if scenario_key == "area":
+        # Автоматическая площадь = площадь конкурента для покрытия потребности
+        auto_area = silo_demand_c / c_yield if c_yield > 0 else 0
+        fixed_area_ha = st.number_input(
+            "Фиксированная площадь, га",
+            value=float(round(auto_area, 1)),
+            step=10.0, format="%.1f",
+            help="Площадь, на которой будут посеяны оба гибрида. "
+                 "По умолчанию — площадь конкурента для покрытия потребности."
+        )
 
     # ================== ПРОВЕРКИ ==================
     warn_list = []
@@ -218,7 +250,7 @@ def render_economics_page():
         st.error("Невозможно рассчитать: урожайность = 0.")
         return
 
-    # ================== РАСЧЁТ ВЫРАЩИВАНИЯ ==================
+    # ================== РАСЧЁТ ==================
     result = calculate_economics(
         silenta={"silo_demand": silo_demand_c, "yield_green": s_yield,
                   "seeding_rate": s_seed_rate, "seed_price": s_seed_price,
@@ -228,6 +260,8 @@ def render_economics_page():
                      "seeding_rate": c_seed_rate, "seed_price": c_seed_price,
                      "field_cost": c_field_cost, "dm_pct": c_dm,
                      "me": c_me, "grain_price": grain_price},
+        scenario=scenario_key,
+        fixed_area_ha=fixed_area_ha,
     )
 
     s = result["silenta"]
@@ -235,122 +269,137 @@ def render_economics_page():
 
     # ================== СВОДНАЯ ТАБЛИЦА ==================
     st.subheader("3. Сравнение гибридов")
-    comparison = pd.DataFrame([
-        {"Показатель": "Урожайность ЗМ, ц/га",
-         s_name: _fmt(s_yield, 1), c_name: _fmt(c_yield, 1)},
-        {"Показатель": "Площадь сева, га",
-         s_name: _fmt(s["area"], 1), c_name: _fmt(c["area"], 1)},
-        {"Показатель": "Затраты на семена, на 1 га",
-         s_name: _fmt(s["seed_cost_per_ha"], 0),
-         c_name: _fmt(c["seed_cost_per_ha"], 0)},
-        {"Показатель": "Затраты на всю площадь",
-         s_name: _fmt(s["total_cost"], 0),
-         c_name: _fmt(c["total_cost"], 0)},
-        {"Показатель": "Содержание СВ, %",
-         s_name: _fmt(s_dm, 1), c_name: _fmt(c_dm, 1)},
-        {"Показатель": "Урожайность СВ, ц/га",
-         s_name: _fmt(s["dm_yield"], 1), c_name: _fmt(c["dm_yield"], 1)},
-        {"Показатель": "Валовый сбор СВ, ц",
-         s_name: _fmt(s["dm_total"], 0), c_name: _fmt(c["dm_total"], 0)},
-        {"Показатель": "ОЭ, МДж/кг СВ",
-         s_name: _fmt(s_me, 2), c_name: _fmt(c_me, 2)},
-        {"Показатель": "**Выход ОЭ, МДж/га**",
-         s_name: f"**{_fmt(s['me_per_ha'], 0)}**",
-         c_name: f"**{_fmt(c['me_per_ha'], 0)}**"},
-    ])
+
+    if scenario_key == "area":
+        comparison = pd.DataFrame([
+            {"Показатель": "Площадь, га",
+             s_name: _fmt(result["same_area"], 1),
+             c_name: _fmt(result["same_area"], 1)},
+            {"Показатель": "Урожайность ЗМ, ц/га",
+             s_name: _fmt(s_yield, 1), c_name: _fmt(c_yield, 1)},
+            {"Показатель": "Содержание СВ, %",
+             s_name: _fmt(s_dm, 1), c_name: _fmt(c_dm, 1)},
+            {"Показатель": "Урожайность СВ, ц/га",
+             s_name: _fmt(s["dm_yield"], 1), c_name: _fmt(c["dm_yield"], 1)},
+            {"Показатель": "Валовый сбор СВ, ц",
+             s_name: _fmt(s["dm_yield"] * result["same_area"], 0),
+             c_name: _fmt(c["dm_yield"] * result["same_area"], 0)},
+            {"Показатель": "Затраты на 1 га",
+             s_name: _fmt(s["seed_cost_per_ha"] + s["field_cost"], 0),
+             c_name: _fmt(c["seed_cost_per_ha"] + c["field_cost"], 0)},
+            {"Показатель": "Затраты на всю площадь",
+             s_name: _fmt(result["cost_silenta"], 0),
+             c_name: _fmt(result["cost_competitor"], 0)},
+            {"Показатель": "ОЭ, МДж/кг СВ",
+             s_name: _fmt(s_me, 2), c_name: _fmt(c_me, 2)},
+        ])
+    else:
+        comparison = pd.DataFrame([
+            {"Показатель": "Площадь сева, га",
+             s_name: _fmt(s["area"], 1), c_name: _fmt(c["area"], 1)},
+            {"Показатель": "Урожайность ЗМ, ц/га",
+             s_name: _fmt(s_yield, 1), c_name: _fmt(c_yield, 1)},
+            {"Показатель": "Содержание СВ, %",
+             s_name: _fmt(s_dm, 1), c_name: _fmt(c_dm, 1)},
+            {"Показатель": "Урожайность СВ, ц/га",
+             s_name: _fmt(s["dm_yield"], 1), c_name: _fmt(c["dm_yield"], 1)},
+            {"Показатель": "Валовый сбор СВ, ц",
+             s_name: _fmt(s["dm_total"], 0), c_name: _fmt(c["dm_total"], 0)},
+            {"Показатель": "Затраты на 1 га",
+             s_name: _fmt(s["seed_cost_per_ha"] + s["field_cost"], 0),
+             c_name: _fmt(c["seed_cost_per_ha"] + c["field_cost"], 0)},
+            {"Показатель": "Затраты на всю площадь",
+             s_name: _fmt(s["total_cost"], 0),
+             c_name: _fmt(c["total_cost"], 0)},
+            {"Показатель": "ОЭ, МДж/кг СВ",
+             s_name: _fmt(s_me, 2), c_name: _fmt(c_me, 2)},
+        ])
     st.dataframe(comparison, use_container_width=True, hide_index=True)
 
     # ================== ЭКОНОМИЯ НА ВЫРАЩИВАНИИ ==================
     st.subheader("4. Экономия на выращивании")
 
-    e1, e2, e3, e4 = st.columns(4)
-    e1.metric("Освобождено площади", f"{_fmt(result['freed_area'], 1)} га")
-    e2.metric("Экономия затрат", f"{_fmt(result['saving_field'], 0)}")
-    e3.metric("Разница ОЭ/га",
-              f"{_fmt(result['delta_me_per_ha'], 0)} МДж")
-    e4.metric("Эквивалент зерна",
-              f"{_fmt(result['grain_equiv_per_ha'], 0)} кг/га")
+    if scenario_key == "area":
+        st.caption("Оба гибрида засеяны на одной площади. Сравниваем затраты "
+                   "и стоимость излишка у более урожайного.")
 
-    total_col1, total_col2 = st.columns(2)
-    total_col1.metric("Экономия на зерне",
-                       f"{_fmt(result['saving_grain'], 0)}")
-    total_col2.metric("💰 Экономия на выращивании (в год)",
-                       f"{_fmt(result['total_saving'], 0)}")
+        ea, eb, ec = st.columns(3)
+        ea.metric(f"Затраты — {s_name}",
+                   f"{_fmt(result['cost_silenta'], 0)}")
+        eb.metric(f"Затраты — {c_name}",
+                   f"{_fmt(result['cost_competitor'], 0)}")
+        ec.metric("Экономия затрат",
+                   f"{_fmt(result['saving_field'], 0)}")
 
-    if result["total_saving"] > 0:
-        st.success(
-            f"**{s_name}** обеспечивает экономию на выращивании "
-            f"**{_fmt(result['total_saving'], 0)}** "
-            f"({_fmt(result['total_saving_per_ha'], 0)} /га).")
-    elif result["total_saving"] < 0:
-        st.error(f"При текущих параметрах **{s_name}** проигрывает "
-                 f"**{c_name}** на {_fmt(abs(result['total_saving']), 0)}.")
-
-    # ================== ИЗЛИШЕК СИЛОСА ==================
-    st.markdown("---")
-    st.subheader("4.1. Излишек силоса при одинаковой площади")
-    st.caption("Если засеять одинаковую площадь (по площади конкурента), "
-               "урожайный гибрид даст больше силоса. Этот излишек можно "
-               "продать или скормить — это чистая дополнительная выгода.")
-
-    show_surplus = st.checkbox(
-        "Учитывать излишек силоса",
-        value=True,
-        key="show_surplus",
-    )
-
-    if show_surplus:
-        sc1, sc2 = st.columns(2)
-        with sc1:
-            silo_price_surplus = st.number_input(
-                "Цена силоса за 1 т ЗМ (для продажи)",
-                value=200.0, step=10.0, format="%.1f",
-                key="surplus_silo_price",
-                help="Сколько стоит 1 тонна готового силоса (ЗМ)")
-        with sc2:
-            st.metric("Одинаковая площадь (по конкуренту)",
-                       f"{_fmt(c['area'], 1)} га")
-
-        surplus = calc_silo_surplus(
-            silenta_result=s,
-            competitor_result=c,
-            silo_price_per_t=silo_price_surplus,
-            grain_price=grain_price,
-        )
+        st.markdown("---")
+        st.markdown("#### Излишек силоса")
+        st.caption(f"**{s_name}** на той же площади даёт больше силоса. "
+                   "Этот излишек можно продать или использовать как замену "
+                   "покупного зерна.")
 
         sm1, sm2, sm3 = st.columns(3)
-        sm1.metric("Излишек СВ", f"{_fmt(surplus['surplus_dm_t'], 1)} т СВ")
-        sm2.metric("Излишек ЗМ", f"{_fmt(surplus['surplus_gm_t'], 1)} т ЗМ")
-        sm3.metric("Эквивалент зерна",
-                    f"{_fmt(surplus['surplus_grain_t'], 1)} т зерна")
+        sm1.metric("Излишек СВ",
+                    f"{_fmt(result['surplus_dm_t'], 1)} т СВ")
+        sm2.metric("Излишек ЗМ (силоса)",
+                    f"{_fmt(result['surplus_gm_t'], 1)} т ЗМ")
+        sm3.metric("Эквивалент зерна по ОЭ",
+                    f"{_fmt(result['surplus_grain_t'], 1)} т зерна")
 
-        st.markdown("**Оценка стоимости излишка (два варианта):**")
-        ev1, ev2 = st.columns(2)
-        ev1.metric("💰 Продажа силоса",
-                    f"{_fmt(surplus['saving_sale'], 0)}")
-        ev2.metric("💰 Как замена зерна по ОЭ",
-                    f"{_fmt(surplus['saving_grain_equiv'], 0)}")
-
-        st.info(
-            f"**Пояснение.** Если оба гибрида засеять на "
-            f"{_fmt(c['area'], 1)} га, то {s_name} даст на "
-            f"**{_fmt(surplus['surplus_dm_t'], 1)} т СВ** больше. Это:\n\n"
-            f"• **Продажа силоса:** {_fmt(surplus['surplus_gm_t'], 1)} т ЗМ × "
-            f"{_fmt(silo_price_surplus, 0)} = "
-            f"**{_fmt(surplus['saving_sale'], 0)}**\n\n"
-            f"• **Как замена зерна:** излишек содержит "
-            f"{_fmt(surplus['surplus_me_mj'], 0)} МДж ОЭ = "
-            f"{_fmt(surplus['surplus_grain_t'], 1)} т зерна × "
-            f"{_fmt(grain_price, 0)} = "
-            f"**{_fmt(surplus['saving_grain_equiv'], 0)}**\n\n"
-            f"Разница между оценками в том, что силос и зерно не полностью "
-            f"взаимозаменяемы — силос даёт объёмистость, зерно — концентрацию."
+        st.markdown("**Как оценить излишек?** Выберите вариант:")
+        val_type = st.radio(
+            "Метод оценки излишка:",
+            [
+                "💰 Как продажа силоса (по цене силоса за 1 т ЗМ)",
+                "🌾 Как замена покупного зерна (по цене зерна за 1 т)",
+            ],
+            key="surplus_val_type",
+            horizontal=False,
         )
 
-        st.session_state["econ_surplus"] = surplus
-        st.session_state["econ_surplus_price"] = silo_price_surplus
+        if "продажа" in val_type.lower():
+            silo_price_surplus = st.number_input(
+                "Цена силоса за 1 т ЗМ",
+                value=200.0, step=10.0, format="%.1f",
+                key="surplus_silo_price")
+            surplus_value = result["surplus_gm_t"] * silo_price_surplus
+            surplus_note = (f"{_fmt(result['surplus_gm_t'], 1)} т ЗМ × "
+                            f"{_fmt(silo_price_surplus, 0)} = "
+                            f"**{_fmt(surplus_value, 0)}**")
+        else:
+            surplus_value = result["surplus_grain_t"] * grain_price
+            surplus_note = (f"{_fmt(result['surplus_grain_t'], 1)} т зерна × "
+                            f"{_fmt(grain_price, 0)} = "
+                            f"**{_fmt(surplus_value, 0)}**")
+
+        st.info(f"**Оценка излишка:** {surplus_note}")
+
+        total_field_saving = result["saving_field"] + surplus_value
+        st.metric("💰 Итого по выращиванию",
+                   f"{_fmt(total_field_saving, 0)}")
+        st.session_state["_econ_field_total"] = total_field_saving
     else:
-        st.session_state.pop("econ_surplus", None)
+        st.caption("Площади подобраны так, чтобы получить нужный объём силоса.")
+
+        ea, eb, ec, ed = st.columns(4)
+        ea.metric(f"Площадь — {s_name}",
+                   f"{_fmt(result['silenta_area'], 1)} га")
+        eb.metric(f"Площадь — {c_name}",
+                   f"{_fmt(result['competitor_area'], 1)} га")
+        ec.metric("Освобождено площади",
+                   f"{_fmt(result['freed_area'], 1)} га")
+        ed.metric("Экономия затрат",
+                   f"{_fmt(result['saving_field'], 0)}")
+
+        st.metric("💰 Итого по выращиванию",
+                   f"{_fmt(result['saving_field'], 0)}")
+        st.session_state["_econ_field_total"] = result["saving_field"]
+
+        st.caption(
+            f"**{s_name}** требует меньше площади для покрытия потребности "
+            f"({_fmt(result['silenta_area'], 1)} га против "
+            f"{_fmt(result['competitor_area'], 1)} га), но затраты на 1 га "
+            f"у него выше из-за стоимости семян."
+        )
 
     # ================== ЭКОНОМИЯ НА КОРМАХ ==================
     st.markdown("---")
@@ -428,7 +477,7 @@ def render_economics_page():
             ])
             st.dataframe(feed_table, use_container_width=True, hide_index=True)
             st.caption("Отрицательная разница по силосу перекрывается "
-                       "экономией на комбикорме в несколько раз.")
+                       "экономией на комбикорме.")
 
             st.markdown(f"#### Экономия на поголовье ({n_cows} голов)")
             econ_rows = [
@@ -466,29 +515,31 @@ def render_economics_page():
     st.markdown("---")
     st.subheader("6. Совокупная годовая экономия")
 
-    grand = result["total_saving"]
-    rows = [
-        {"Источник": "Выращивание (урожайность + ОЭ)",
-         "В год": _fmt(result["total_saving"], 0)},
-    ]
+    field_total = st.session_state.get("_econ_field_total", 0)
+    feed_total = 0
     if "econ_feed_result" in st.session_state:
-        fe = st.session_state["econ_feed_result"]
-        grand += fe["total_feed_year"]
-        rows.append({"Источник": "Кормление (силос + концентраты)",
-                     "В год": _fmt(fe["total_feed_year"], 0)})
-    if "econ_surplus" in st.session_state:
-        sp = st.session_state["econ_surplus"]
-        grand += sp["saving_sale"]
-        rows.append({"Источник": "Излишек силоса (продажа)",
-                     "В год": _fmt(sp["saving_sale"], 0)})
-    rows.append({"Источник": "**ИТОГО за год**",
-                 "В год": f"**{_fmt(grand, 0)}**"})
+        feed_total = st.session_state["econ_feed_result"]["total_feed_year"]
 
-    st.dataframe(pd.DataFrame(rows),
-                 use_container_width=True, hide_index=True)
+    grand = field_total + feed_total
+
+    rows = [
+        {"Источник": "Выращивание", "В год": _fmt(field_total, 0)},
+    ]
+    if feed_total:
+        rows.append({"Источник": "Кормление", "В год": _fmt(feed_total, 0)})
+    rows.append({"Источник": "**ИТОГО за год**", "В год": f"**{_fmt(grand, 0)}**"})
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     if grand > 0:
         st.success(f"💰 Совокупная годовая экономия: **{_fmt(grand, 0)}**.")
+    elif grand < 0:
+        st.error(f"При текущих параметрах **{c_name}** выгоднее на "
+                 f"**{_fmt(abs(grand), 0)}**.")
+
+    st.session_state["econ_scenario"] = scenario_key
+    st.session_state["econ_result"] = result
+    st.session_state["econ_grand"] = grand
 
     # ================== ГРАФИКИ ==================
     st.subheader("7. Графики")
@@ -507,28 +558,37 @@ def render_economics_page():
                               title="Выход ОЭ с гектара")
         st.plotly_chart(fig_me, use_container_width=True)
     with g2:
+        if scenario_key == "area":
+            cost_s = result["cost_silenta"]
+            cost_c = result["cost_competitor"]
+            title = f"Затраты на {_fmt(result['same_area'], 1)} га"
+        else:
+            cost_s = s["total_cost"]
+            cost_c = c["total_cost"]
+            title = "Затраты на всю площадь"
+
         fig_cost = go.Figure(data=[
-            go.Bar(name=s_name, x=["Затраты"], y=[s["total_cost"]],
-                   marker_color="#2C7A3E", text=[_fmt(s["total_cost"], 0)],
+            go.Bar(name=s_name, x=["Затраты"], y=[cost_s],
+                   marker_color="#2C7A3E", text=[_fmt(cost_s, 0)],
                    textposition="outside"),
-            go.Bar(name=c_name, x=["Затраты"], y=[c["total_cost"]],
-                   marker_color="#7F8C8D", text=[_fmt(c["total_cost"], 0)],
+            go.Bar(name=c_name, x=["Затраты"], y=[cost_c],
+                   marker_color="#7F8C8D", text=[_fmt(cost_c, 0)],
                    textposition="outside"),
         ])
         fig_cost.update_layout(height=350, showlegend=True,
                                 margin=dict(l=10, r=10, t=40, b=10),
-                                title="Затраты на всю площадь")
+                                title=title)
         st.plotly_chart(fig_cost, use_container_width=True)
 
     # ================== AI-ВЫВОД ==================
     st.markdown("---")
-    st.subheader("8. 🩺 Экономический вывод (ИИ)")
+    st.subheader("8. 🩺 Экономический вывод")
 
     col_a, col_b = st.columns([1, 4])
     with col_a:
         refresh_econ = st.button("🔄 Обновить", key="econ_ai_refresh")
 
-    feed_context_extra = ""
+    feed_context_extra = f"\n=== СЦЕНАРИЙ ===\n{scenario}\n"
     if "econ_feed_result" in st.session_state:
         fe = st.session_state["econ_feed_result"]
         feed_context_extra += (
@@ -541,14 +601,6 @@ def render_economics_page():
             f"Общая экономия на кормах в год: {fe['total_feed_year']:,.0f}\n"
             .replace(",", " ")
         )
-    if "econ_surplus" in st.session_state:
-        sp = st.session_state["econ_surplus"]
-        feed_context_extra += (
-            f"\n=== ИЗЛИШЕК СИЛОСА ===\n"
-            f"При одинаковой площади ({sp['same_area']:.1f} га) излишек:\n"
-            f"{sp['surplus_dm_t']:.1f} т СВ = {sp['surplus_gm_t']:.1f} т ЗМ\n"
-            f"Продажа: {sp['saving_sale']:,.0f}\n".replace(",", " ")
-        )
 
     econ_context = build_economics_context(
         result, s_name, c_name,
@@ -556,7 +608,7 @@ def render_economics_page():
         competitor_extra=competitor_extra,
     ) + feed_context_extra
 
-    with st.spinner("AI анализирует экономику..."):
+    with st.spinner("Анализируем экономику..."):
         econ_ai_text = get_economics_ai_recommendation(
             econ_context, force_refresh=refresh_econ
         )
@@ -584,8 +636,10 @@ def render_economics_page():
                         competitor_extra=competitor_extra,
                         feed_econ=st.session_state.get("econ_feed_result"),
                         feed_params=st.session_state.get("econ_feed_params"),
-                        surplus=st.session_state.get("econ_surplus"),
                         total_grand=grand,
+                        scenario=scenario_key,
+                        surplus_value=st.session_state.get(
+                            "_econ_field_total", 0) - result["saving_field"],
                     )
                     st.session_state["econ_pdf_bytes"] = pdf_bytes
                     st.success("PDF готов!")
